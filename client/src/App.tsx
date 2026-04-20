@@ -5,6 +5,7 @@ import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import SignUpPage from './pages/SignUpPage';
 import ProfilePage from './pages/ProfilePage';
+import DeckBuilderPage from './pages/DeckBuilderPage';
 
 export default function App() {
   return (
@@ -18,12 +19,10 @@ export default function App() {
           {/* Protected */}
           <Route element={<ProtectedRoute />}>
             <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/deck-builder/:deckId" element={<DeckBuilderPage />} />
           </Route>
 
-          {/* Home — accessible to all, shows different content based on auth state */}
           <Route path="/" element={<HomePage />} />
-
-          {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
