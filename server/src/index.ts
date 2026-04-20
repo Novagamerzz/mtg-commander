@@ -12,7 +12,7 @@ import type {
   GameCard,
   TurnPhase,
   Room,
-} from '@mtg-commander/types';
+} from './types';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -395,7 +395,7 @@ io.on('connection', (socket) => {
     }
     room.status = 'in_progress';
     const game = createGame(room);
-    games.set(roomId, game);
+    games.set(roomId!, game);
     broadcastGame(game);
     broadcastLobby();
     console.log(`[game:start] room ${roomId} — ${room.players.length} players`);
