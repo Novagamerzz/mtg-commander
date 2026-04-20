@@ -300,18 +300,18 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
 
 // ── Canvas layout helpers ─────────────────────────────────────────────────────
 
-const C_W = 80, C_H = 112;
-const C_LW = 64, C_LH = 90;
-const C_HGAP = 10, C_RGAP = 14;
-const C_LBLW = 58;
+const C_W = 100, C_H = 140;    // card base size — 100 px wide, 1.4 ratio
+const C_LW = 80,  C_LH = 112;   // lands slightly smaller
+const C_HGAP = 12, C_RGAP = 18; // gaps
+const C_LBLW = 72;               // row-label column width
 
 // Zone colors: [me, op1, op2, op3]
 const ZONE_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7'];
 
 const CANVAS_W = 3200;
 const CANVAS_H = 2000;
-const OPP_INFO_H = 54;
-const MY_LABEL_H = 26;
+const OPP_INFO_H = 72;  // opponent info header height
+const MY_LABEL_H = 32;  // my zone top label height
 
 interface CRow {
   label: string; isLand: boolean;
@@ -385,9 +385,9 @@ function MiniPile({ cards, label, color, onHover, onHoverEnd }: {
   const top = cards[cards.length - 1];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-      <span style={{ fontSize: 7, color: 'rgba(255,255,255,0.3)', fontWeight: 700, letterSpacing: 1 }}>{label}</span>
-      <div style={{ position: 'relative', width: 38, height: 54, borderRadius: 5, overflow: 'hidden',
-        border: `1px dashed ${color}55`, background: 'rgba(0,0,0,0.35)' }}
+      <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontWeight: 700, letterSpacing: 1 }}>{label}</span>
+      <div style={{ position: 'relative', width: 48, height: 68, borderRadius: 6, overflow: 'hidden',
+        border: `1px dashed ${color}70`, background: 'rgba(0,0,0,0.35)' }}
         onMouseEnter={() => top && onHover(top)} onMouseLeave={onHoverEnd}>
         {top?.imageUri && <img src={top.imageUri} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.75 }} />}
         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0,
@@ -403,31 +403,33 @@ function MiniPile({ cards, label, color, onHover, onHoverEnd }: {
 
 function ZoneHeader({ player, color }: { player: PersonalPlayerState; color: string }) {
   const life = player.life;
-  const lifeColor = life <= 0 ? '#dc2626' : life <= 10 ? '#f97316' : '#f9fafb';
+  const lifeColor = life <= 0 ? '#ef4444' : life <= 10 ? '#fb923c' : '#f1f5f9';
   const commander = player.commandZone[0];
   return (
     <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: OPP_INFO_H,
-      background: 'rgba(0,0,0,0.55)', borderRadius: '12px 12px 0 0',
-      borderBottom: `1px solid ${color}28`,
-      display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px',
+      background: 'rgba(0,0,0,0.72)', borderRadius: '12px 12px 0 0',
+      borderBottom: `1px solid ${color}50`,
+      display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px',
       zIndex: 2 }}>
       {player.isActive && (
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#facc15',
-          boxShadow: '0 0 6px #facc15', flexShrink: 0, display: 'inline-block' }} />
+        <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#facc15',
+          boxShadow: '0 0 8px #facc15', flexShrink: 0, display: 'inline-block' }} />
       )}
-      <span style={{ fontWeight: 700, fontSize: 13, color: '#fff', flexShrink: 0 }}>{player.playerName}</span>
-      {commander && (
-        <span style={{ fontSize: 11, color: '#f59e0b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-          ⚜ {commander.name.split(',')[0]}
-        </span>
-      )}
-      {!commander && <span style={{ flex: 1 }} />}
-      <div style={{ display: 'flex', gap: 10, fontSize: 11, color: '#6b7280', flexShrink: 0 }}>
-        <span>✋{player.handCount}</span>
-        <span>📚{player.libraryCount}</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
+        <span style={{ fontWeight: 800, fontSize: 15, color: '#f1f5f9', lineHeight: 1.1 }}>{player.playerName}</span>
+        {commander && (
+          <span style={{ fontSize: 11, color: '#fbbf24', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            ⚜ {commander.name.split(',')[0]}
+          </span>
+        )}
       </div>
-      <span style={{ fontSize: 26, fontWeight: 900, fontFamily: 'monospace', color: lifeColor, flexShrink: 0,
-        textShadow: life <= 10 ? `0 0 10px ${lifeColor}88` : 'none' }}>
+      <div style={{ display: 'flex', gap: 14, fontSize: 12, color: '#94a3b8', flexShrink: 0, fontWeight: 600 }}>
+        <span title="Hand">✋ {player.handCount}</span>
+        <span title="Library">📚 {player.libraryCount}</span>
+      </div>
+      <span style={{ fontSize: 34, fontWeight: 900, fontFamily: 'monospace', lineHeight: 1,
+        color: lifeColor, flexShrink: 0,
+        textShadow: life <= 10 ? `0 0 14px ${lifeColor}` : '0 2px 4px rgba(0,0,0,0.8)' }}>
         {life}
       </span>
     </div>
@@ -540,19 +542,19 @@ function TableCanvas({
             <div key={player.socketId} style={{
               position: 'absolute', left: zone.x, top: zone.y, width: zone.w, height: zone.h,
               borderRadius: 14,
-              border: player.isActive ? `2px solid ${color}90` : `1px solid ${color}35`,
-              background: player.isActive ? `${color}0d` : `${color}07`,
-              boxShadow: player.isActive ? `0 0 40px ${color}18` : 'none',
+              border: player.isActive ? `2px solid ${color}cc` : `2px solid ${color}55`,
+              background: player.isActive ? `${color}18` : `${color}0e`,
+              boxShadow: player.isActive ? `0 0 50px ${color}28, inset 0 0 30px ${color}08` : `inset 0 0 20px ${color}06`,
             }}>
               <ZoneHeader player={player} color={color} />
 
               {/* Card rows */}
               {rows.map(row => (
                 <React.Fragment key={row.label}>
-                  <div style={{ position: 'absolute', left: 0, top: OPP_INFO_H + row.y + row.cH / 2 - 7,
+                  <div style={{ position: 'absolute', left: 0, top: OPP_INFO_H + row.y + row.cH / 2 - 8,
                     width: C_LBLW - 4, textAlign: 'right', pointerEvents: 'none' }}>
-                    <span style={{ fontSize: 7, fontWeight: 700, letterSpacing: 1,
-                      color: row.isLand ? 'rgba(134,239,172,0.22)' : 'rgba(255,255,255,0.18)' }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5,
+                      color: row.isLand ? 'rgba(134,239,172,0.7)' : 'rgba(255,255,255,0.55)' }}>
                       {row.label.split('/')[0].toUpperCase()}
                     </span>
                   </div>
@@ -616,9 +618,9 @@ function TableCanvas({
           position: 'absolute', left: layout.my.x, top: layout.my.y,
           width: layout.my.w, height: layout.my.h,
           borderRadius: 14,
-          border: me.isActive ? `2px solid ${myColor}90` : `1px solid ${myColor}35`,
-          background: me.isActive ? `${myColor}0d` : `${myColor}07`,
-          boxShadow: me.isActive ? `0 0 40px ${myColor}18` : 'none',
+          border: me.isActive ? `2px solid ${myColor}cc` : `2px solid ${myColor}55`,
+          background: me.isActive ? `${myColor}18` : `${myColor}0e`,
+          boxShadow: me.isActive ? `0 0 50px ${myColor}28, inset 0 0 30px ${myColor}08` : `inset 0 0 20px ${myColor}06`,
         }}>
 
           {/* My name label */}
@@ -628,7 +630,7 @@ function TableCanvas({
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#facc15',
                 boxShadow: '0 0 6px #facc15', display: 'inline-block' }} />
             )}
-            <span style={{ fontSize: 11, fontWeight: 700, color: `${myColor}cc` }}>{me.playerName}</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: `${myColor}ee` }}>{me.playerName}</span>
           </div>
 
           {/* Drop highlight overlay */}
@@ -663,10 +665,10 @@ function TableCanvas({
           {/* Card rows */}
           {myRows.map(row => (
             <React.Fragment key={row.label}>
-              <div style={{ position: 'absolute', left: 0, top: MY_LABEL_H + row.y + row.cH / 2 - 7,
+              <div style={{ position: 'absolute', left: 0, top: MY_LABEL_H + row.y + row.cH / 2 - 8,
                 width: C_LBLW - 4, textAlign: 'right', pointerEvents: 'none' }}>
-                <span style={{ fontSize: 7, fontWeight: 700, letterSpacing: 1,
-                  color: row.isLand ? 'rgba(134,239,172,0.25)' : 'rgba(255,255,255,0.2)' }}>
+                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5,
+                  color: row.isLand ? 'rgba(134,239,172,0.7)' : 'rgba(255,255,255,0.55)' }}>
                   {row.label.split('/')[0].toUpperCase()}
                 </span>
               </div>
@@ -1140,11 +1142,11 @@ export default function GameBoardPage() {
             </div>
             {myCommander && (
               <button onClick={emit.castCommander}
-                className="mt-0.5 text-[10px] font-bold px-2 py-0.5 rounded-md transition hover:brightness-110"
-                style={{ background: 'linear-gradient(135deg, #92400e, #78350f)',
-                  border: '1px solid rgba(250,204,21,0.3)', color: '#fbbf24',
-                  boxShadow: '0 0 6px rgba(250,204,21,0.2)' }}>
-                ⚡ Cast
+                className="mt-1 text-xs font-bold px-3 py-1 rounded-md transition hover:brightness-110 active:scale-95"
+                style={{ background: 'linear-gradient(135deg, #d97706, #b45309)',
+                  border: '1px solid #fbbf24', color: '#111',
+                  boxShadow: '0 0 10px rgba(251,191,36,0.4)' }}>
+                ⚡ Cast Commander
               </button>
             )}
           </div>
@@ -1155,16 +1157,16 @@ export default function GameBoardPage() {
           style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 16 }}>
           <button onClick={openLibraryModal} title="Search library"
             className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
-            style={{ color: '#4b5563' }}>📚 {me.libraryCount}</button>
-          <span style={{ color: '#374151' }}>✋ {me.handCount}</span>
+            style={{ color: '#94a3b8' }}>📚 {me.libraryCount}</button>
+          <span style={{ color: '#94a3b8' }}>✋ {me.handCount}</span>
           <button onClick={() => setZoneModal('graveyard')} title="View graveyard"
             className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
-            style={{ color: me.graveyard.length > 0 ? '#9ca3af' : '#4b5563' }}>
+            style={{ color: me.graveyard.length > 0 ? '#cbd5e1' : '#64748b' }}>
             🪦 {me.graveyard.length}
           </button>
           <button onClick={() => setZoneModal('exile')} title="View exile"
             className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
-            style={{ color: me.exile.length > 0 ? '#a78bfa' : '#4b5563' }}>
+            style={{ color: me.exile.length > 0 ? '#c4b5fd' : '#64748b' }}>
             ✦ {me.exile.length}
           </button>
           <button onClick={() => setShowTokenModal(true)} title="Create a token"
@@ -1188,8 +1190,8 @@ export default function GameBoardPage() {
       </div>
 
       {/* ── My hand (pinned at bottom) ── */}
-      <div className="shrink-0 flex items-end gap-1.5 px-5 pb-2 pt-1 overflow-x-auto"
-        style={{ height: 104, borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.3)' }}>
+      <div className="shrink-0 flex items-end gap-2 px-5 pb-3 pt-1 overflow-x-auto"
+        style={{ height: 124, borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.3)' }}>
         {me.hand.length === 0 ? (
           <p className="text-xs italic self-center w-full text-center" style={{ color: 'rgba(255,255,255,0.08)' }}>
             Hand empty — click Draw to draw a card
@@ -1205,7 +1207,7 @@ export default function GameBoardPage() {
                 onMouseEnter={() => setHoverCard(card)}
                 onMouseLeave={() => setHoverCard(null)}
                 className="shrink-0 transition-transform duration-150 origin-bottom relative group/card"
-                style={{ width: 60, cursor: playable ? 'grab' : 'not-allowed', opacity: playable ? 1 : 0.45 }}
+                style={{ width: 76, cursor: playable ? 'grab' : 'not-allowed', opacity: playable ? 1 : 0.45 }}
                 onMouseOver={(e) => {
                   if (playable) (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-16px) scale(1.08)';
                 }}
@@ -1217,7 +1219,7 @@ export default function GameBoardPage() {
                 {card.imageUri
                   ? <img src={card.imageUri} alt={card.name} className="w-full rounded-xl"
                       style={{ boxShadow: '0 8px 20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08)' }} />
-                  : <CardBack style={{ width: 60, height: 84 }} />}
+                  : <CardBack style={{ width: 76, height: 106 }} />}
                 {!playable && (
                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/card:block z-20 pointer-events-none"
                     style={{ width: 140 }}>
