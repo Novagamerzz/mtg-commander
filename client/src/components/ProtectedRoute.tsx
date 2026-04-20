@@ -1,5 +1,6 @@
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import NavBar from './NavBar';
 
 export default function ProtectedRoute() {
   const { user, loading } = useAuth();
@@ -12,5 +13,14 @@ export default function ProtectedRoute() {
     );
   }
 
-  return user ? <Outlet /> : <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" replace />;
+
+  return (
+    <div className="h-screen flex flex-col overflow-hidden">
+      <NavBar />
+      <div className="flex-1 overflow-auto">
+        <Outlet />
+      </div>
+    </div>
+  );
 }
