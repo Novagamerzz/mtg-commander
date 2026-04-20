@@ -1216,6 +1216,8 @@ export default function GameBoardPage() {
 
   const [timingToast, setTimingToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [announcement, setAnnouncement] = useState<string | null>(null);
+  const announcementTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [commanderPopup, setCommanderPopup] = useState<{
     cardName: string; instanceId: string; destination: 'graveyard' | 'exile';
@@ -1231,12 +1233,19 @@ export default function GameBoardPage() {
       if (toastTimer.current) clearTimeout(toastTimer.current);
       toastTimer.current = setTimeout(() => setTimingToast(null), 4500);
     });
+    socket.on('game:announcement', ({ message }) => {
+      setAnnouncement(message);
+      if (announcementTimer.current) clearTimeout(announcementTimer.current);
+      announcementTimer.current = setTimeout(() => setAnnouncement(null), 6000);
+    });
     socket.emit('game:rejoin');
     return () => {
       socket.off('game:state', setGameState);
       socket.off('game:library_contents');
       socket.off('game:error');
+      socket.off('game:announcement');
       if (toastTimer.current) clearTimeout(toastTimer.current);
+      if (announcementTimer.current) clearTimeout(announcementTimer.current);
     };
   }, []);
 
@@ -1650,6 +1659,22 @@ export default function GameBoardPage() {
           <button onClick={() => setTimingToast(null)}
             className="shrink-0 ml-1 w-5 h-5 flex items-center justify-center rounded transition hover:bg-white/10"
             style={{ color: '#6b7280' }}>×</button>
+        </div>
+      )}
+
+      {/* ── Defeat announcement overlay ── */}
+      {announcement && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center pointer-events-none">
+          <div className="flex flex-col items-center gap-3 px-10 py-8 rounded-3xl text-center"
+            style={{ background: 'rgba(10,0,0,0.92)', border: '2px solid rgba(239,68,68,0.6)',
+              boxShadow: '0 0 80px rgba(239,68,68,0.3), 0 40px 80px rgba(0,0,0,0.9)',
+              backdropFilter: 'blur(12px)', maxWidth: 480 }}>
+            <span style={{ fontSize: 52 }}>💀</span>
+            <p className="text-xl font-black" style={{ color: '#fca5a5', lineHeight: 1.3 }}>{announcement}</p>
+            <button className="pointer-events-auto text-xs px-4 py-1.5 rounded-lg mt-1 transition hover:bg-white/10"
+              style={{ color: '#6b7280', border: '1px solid rgba(255,255,255,0.08)' }}
+              onClick={() => setAnnouncement(null)}>Dismiss</button>
+          </div>
         </div>
       )}
 

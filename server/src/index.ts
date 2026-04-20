@@ -511,9 +511,29 @@ io.on('connection', (socket) => {
     if (!game) return;
     const player = game.players.find((p) => p.socketId === socket.id);
     if (!player) return;
-    player.commanderDamage[fromSocketId] = Math.max(
-      0, (player.commanderDamage[fromSocketId] ?? 0) + delta
-    );
+
+    const prev = player.commanderDamage[fromSocketId] ?? 0;
+    const next = Math.max(0, prev + delta);
+    const actualDelta = next - prev; // may differ from delta if clamped at 0
+    if (actualDelta === 0) return;
+
+    player.commanderDamage[fromSocketId] = next;
+
+    // Automatically apply commander damage as life loss (positive delta = damage dealt)
+    player.life = Math.max(0, player.life - actualDelta);
+    appendLog(game, `${player.playerName}: ${actualDelta > 0 ? `−${actualDelta}` : `+${-actualDelta}`} from commander damage → life ${player.life}`);
+
+    // Win condition: 21 commander damage from a single commander
+    if (next >= 21 && prev < 21) {
+      const attacker = game.players.find((p) => p.socketId === fromSocketId);
+      const cmdName = (attacker?.commandZone[0]?.name ?? attacker?.playerName ?? 'Unknown Commander').split(',')[0];
+      const msg = `💀 ${player.playerName} has been defeated by ${cmdName} commander damage!`;
+      appendLog(game, msg);
+      for (const p of game.players) {
+        io.to(p.socketId).emit('game:announcement', { message: msg, type: 'defeat' });
+      }
+    }
+
     broadcastGame(game);
   });
 

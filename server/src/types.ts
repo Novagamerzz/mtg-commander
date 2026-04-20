@@ -102,6 +102,7 @@ export interface PersonalGameState {
 export interface ServerToClientEvents {
   'lobby:rooms': (rooms: Room[]) => void;
   'game:first_player': (data: { playerName: string }) => void;
+  'game:announcement': (data: { message: string; type: 'defeat' | 'info' }) => void;
   'room:updated': (room: Room) => void;
   'room:error': (message: string) => void;
   'game:state': (state: PersonalGameState) => void;
