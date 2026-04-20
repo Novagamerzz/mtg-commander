@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { socket } from '../lib/socket';
+import { fetchCardsByIds } from '../lib/scryfall';
 import type { Room, DeckCardData } from '@mtg-commander/types';
 
 interface SavedDeck {
@@ -77,11 +78,17 @@ export default function GameRoomPage() {
       return;
     }
 
+    // Fetch oracle_text from Scryfall so the server can enforce Flash timing
+    const uniqueIds = [...new Set(cards.map((c) => c.scryfall_id))];
+    const scryfallData = await fetchCardsByIds(uniqueIds);
+    const oracleMap = new Map(scryfallData.map((c) => [c.id, c.oracle_text ?? '']));
+
     const deckCards: DeckCardData[] = cards.map((c) => ({
       scryfallId: c.scryfall_id,
       cardName: c.card_name,
       imageUri: c.image_uri ?? '',
       typeLine: c.type_line ?? '',
+      oracleText: oracleMap.get(c.scryfall_id) ?? '',
       quantity: c.quantity ?? 1,
       isCommander: c.is_commander ?? false,
     }));

@@ -599,6 +599,10 @@ export default function GameBoardPage() {
   const [libraryCards, setLibraryCards] = useState<GameCard[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
 
+  // Timing error toast
+  const [timingToast, setTimingToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Commander replacement popup (EDH rule)
   const [commanderPopup, setCommanderPopup] = useState<{
     cardName: string; instanceId: string; destination: 'graveyard' | 'exile';
@@ -609,8 +613,18 @@ export default function GameBoardPage() {
     if (!socket.connected) socket.connect();
     socket.on('game:state', setGameState);
     socket.on('game:library_contents', (cards) => { setLibraryCards(cards); setLibraryLoading(false); });
+    socket.on('game:error', (msg) => {
+      setTimingToast(msg);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setTimingToast(null), 4500);
+    });
     socket.emit('game:rejoin');
-    return () => { socket.off('game:state', setGameState); socket.off('game:library_contents'); };
+    return () => {
+      socket.off('game:state', setGameState);
+      socket.off('game:library_contents');
+      socket.off('game:error');
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
   }, []);
 
   // Track commander scryfallId so we can identify it when it's on the battlefield
@@ -671,6 +685,26 @@ export default function GameBoardPage() {
     tutor:         (id: string, to: 'hand' | 'battlefield') => socket.emit('game:tutor', { instanceId: id, to }),
   };
 
+  // ── Timing helper (client-side visual hints, server is authoritative) ──────────
+
+  function cardTimingStatus(card: GameCard): { playable: boolean; reason: string } {
+    const isInstant = card.typeLine?.includes('Instant') ?? false;
+    if (isInstant) return { playable: true, reason: 'Instant — can be played any time' };
+
+    if (!isMyTurn) return { playable: false, reason: "It's not your turn — only instants can be played" };
+
+    if (gameState.phase !== 'main1' && gameState.phase !== 'main2') {
+      const phaseLabel = PHASES.find((p) => p.key === gameState.phase)?.label ?? gameState.phase;
+      return { playable: false, reason: `Main Phase only — currently ${phaseLabel}` };
+    }
+
+    if (card.typeLine?.includes('Land') && me.landsPlayedThisTurn >= 1) {
+      return { playable: false, reason: "Already played a land this turn" };
+    }
+
+    return { playable: true, reason: '' };
+  }
+
   // ── Commander replacement interception (EDH rule) ───────────────────────────
 
   function interceptGraveyard(instanceId: string) {
@@ -720,6 +754,13 @@ export default function GameBoardPage() {
           <span className="text-sm font-bold" style={{ color: isMyTurn ? '#facc15' : '#e5e7eb' }}>
             {isMyTurn ? '⚡ Your Turn' : `${active?.playerName}'s Turn`}
           </span>
+          {/* Instant-speed indicator — shown when player can't play sorcery-speed cards */}
+          {(!isMyTurn || (gameState.phase !== 'main1' && gameState.phase !== 'main2')) && (
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md"
+              style={{ background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.35)', color: '#a5b4fc' }}>
+              ⚡ Instants only
+            </span>
+          )}
         </div>
         <div className="w-px h-5 shrink-0" style={{ background: 'rgba(255,255,255,0.1)' }} />
         <div className="flex-1 overflow-x-auto"><PhaseTracker phase={gameState.phase} /></div>
@@ -904,23 +945,42 @@ export default function GameBoardPage() {
                 Hand empty — click Draw to draw a card
               </p>
             ) : (
-              me.hand.map((card) => (
-                <div key={card.instanceId} draggable
-                  onDragStart={(e) => dragStart(e, card.instanceId, 'hand')}
-                  onClick={() => emit.playCard(card.instanceId)}
-                  onMouseEnter={() => setHoverCard(card)}
-                  onMouseLeave={() => setHoverCard(null)}
-                  className="shrink-0 transition-transform duration-150 origin-bottom"
-                  style={{ width: 60, cursor: 'grab' }}
-                  onMouseOver={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-16px) scale(1.08)'; }}
-                  onMouseOut={(e)  => { (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0) scale(1)'; setHoverCard(null); }}
-                  title={`${card.name} — drag to battlefield or click to play`}>
-                  {card.imageUri
-                    ? <img src={card.imageUri} alt={card.name} className="w-full rounded-xl"
-                        style={{ boxShadow: '0 8px 20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08)' }} />
-                    : <CardBack style={{ width: 60, height: 84 }} />}
-                </div>
-              ))
+              me.hand.map((card) => {
+                const { playable, reason } = cardTimingStatus(card);
+                return (
+                  <div key={card.instanceId}
+                    draggable={playable}
+                    onDragStart={playable ? (e) => dragStart(e, card.instanceId, 'hand') : undefined}
+                    onClick={() => emit.playCard(card.instanceId)}
+                    onMouseEnter={() => setHoverCard(card)}
+                    onMouseLeave={() => setHoverCard(null)}
+                    className="shrink-0 transition-transform duration-150 origin-bottom relative group/card"
+                    style={{ width: 60, cursor: playable ? 'grab' : 'not-allowed', opacity: playable ? 1 : 0.45 }}
+                    onMouseOver={(e) => {
+                      if (playable) (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-16px) scale(1.08)';
+                    }}
+                    onMouseOut={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0) scale(1)';
+                      setHoverCard(null);
+                    }}
+                    title={playable ? `${card.name} — drag to battlefield or click to play` : `${card.name} — ${reason}`}>
+                    {card.imageUri
+                      ? <img src={card.imageUri} alt={card.name} className="w-full rounded-xl"
+                          style={{ boxShadow: '0 8px 20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08)' }} />
+                      : <CardBack style={{ width: 60, height: 84 }} />}
+                    {/* Reason tooltip on unplayable cards */}
+                    {!playable && (
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/card:block z-20 pointer-events-none"
+                        style={{ width: 140 }}>
+                        <div className="text-[9px] text-center px-2 py-1 rounded-lg font-medium leading-tight"
+                          style={{ background: '#1c0a0a', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5' }}>
+                          {reason}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
@@ -968,6 +1028,27 @@ export default function GameBoardPage() {
             { label: '↩ Tutor to Hand',       color: '#86efac', onCard: (c) => emit.tutor(c.instanceId, 'hand') },
             { label: '⚡ Put on Battlefield',  color: '#fbbf24', onCard: (c) => emit.tutor(c.instanceId, 'battlefield') },
           ]} />
+      )}
+
+      {/* ── Timing error toast ── */}
+      {timingToast && (
+        <div
+          className="fixed bottom-6 left-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-xl"
+          style={{
+            transform: 'translateX(-50%)',
+            background: '#180808',
+            border: '1px solid rgba(239,68,68,0.45)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.85), 0 0 20px rgba(239,68,68,0.1)',
+            maxWidth: 440,
+            animation: 'fadeInUp 0.2s ease',
+          }}
+        >
+          <span className="text-lg shrink-0">⛔</span>
+          <span className="text-sm font-medium" style={{ color: '#fca5a5' }}>{timingToast}</span>
+          <button onClick={() => setTimingToast(null)}
+            className="shrink-0 ml-1 w-5 h-5 flex items-center justify-center rounded transition hover:bg-white/10"
+            style={{ color: '#6b7280' }}>×</button>
+        </div>
       )}
 
       {/* ── Commander replacement popup (EDH rule) ── */}

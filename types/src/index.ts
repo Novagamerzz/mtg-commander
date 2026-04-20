@@ -35,6 +35,7 @@ export interface DeckCardData {
   cardName: string;
   imageUri: string;
   typeLine: string;
+  oracleText: string;
   quantity: number;
   isCommander: boolean;
 }
@@ -77,6 +78,7 @@ export interface PersonalPlayerState {
   libraryCount: number;
   isActive: boolean;
   commanderCastCount: number; // times commander has been cast (tax = count * 2)
+  landsPlayedThisTurn: number;
 }
 
 export interface PersonalGameState {

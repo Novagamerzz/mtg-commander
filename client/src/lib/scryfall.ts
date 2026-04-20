@@ -45,6 +45,24 @@ export async function searchCards(query: string): Promise<ScryfallCard[]> {
   }
 }
 
+export async function fetchCardsByIds(ids: string[]): Promise<ScryfallCard[]> {
+  const results: ScryfallCard[] = [];
+  for (let i = 0; i < ids.length; i += 75) {
+    const batch = ids.slice(i, i + 75);
+    try {
+      const res = await fetch(`${BASE}/cards/collection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifiers: batch.map((id) => ({ id })) }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      results.push(...((data.data ?? []) as ScryfallCard[]));
+    } catch { continue; }
+  }
+  return results;
+}
+
 export async function fetchCardsByName(names: string[]): Promise<ScryfallCard[]> {
   const results: ScryfallCard[] = [];
   for (let i = 0; i < names.length; i += 75) {

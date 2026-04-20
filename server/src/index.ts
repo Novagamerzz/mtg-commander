@@ -23,7 +23,7 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
 
 interface InternalCard {
   instanceId: string; scryfallId: string;
-  name: string; imageUri: string; typeLine: string; tapped: boolean;
+  name: string; imageUri: string; typeLine: string; oracleText: string; tapped: boolean;
 }
 
 interface InternalPlayer {
@@ -38,6 +38,7 @@ interface InternalPlayer {
   exile: InternalCard[];
   library: InternalCard[];
   commanderCastCount: number;
+  landsPlayedThisTurn: number;
 }
 
 interface InternalGame {
@@ -55,7 +56,7 @@ interface InternalRoomPlayer {
   deckId: string | null; deckName: string | null;
   deckCards: {
     scryfallId: string; cardName: string; imageUri: string;
-    typeLine: string; quantity: number; isCommander: boolean;
+    typeLine: string; oracleText: string; quantity: number; isCommander: boolean;
   }[];
 }
 
@@ -145,6 +146,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
       libraryCount: p.library.length,
       isActive: i === game.activePlayerIndex,
       commanderCastCount: p.commanderCastCount,
+      landsPlayedThisTurn: p.landsPlayedThisTurn,
     })),
   };
 }
@@ -179,6 +181,7 @@ function createGame(room: InternalRoom): InternalGame {
           name: dc.cardName,
           imageUri: dc.imageUri,
           typeLine: dc.typeLine,
+          oracleText: dc.oracleText ?? '',
           tapped: false,
         }))
       )
@@ -193,6 +196,7 @@ function createGame(room: InternalRoom): InternalGame {
           name: commanderData.cardName,
           imageUri: commanderData.imageUri,
           typeLine: commanderData.typeLine,
+          oracleText: commanderData.oracleText ?? '',
           tapped: false,
         }]
       : [];
@@ -216,6 +220,7 @@ function createGame(room: InternalRoom): InternalGame {
       exile: [],
       library: libraryCards,
       commanderCastCount: 0,
+      landsPlayedThisTurn: 0,
     };
   });
 
@@ -256,6 +261,7 @@ function advanceTurn(game: InternalGame) {
 
   const active = game.players[game.activePlayerIndex];
   for (const card of active.battlefield) card.tapped = false;
+  active.landsPlayedThisTurn = 0;
   appendLog(game, `— Turn ${game.turn}: ${active.playerName} —`);
 }
 
@@ -268,6 +274,46 @@ function moveCard(
   card.tapped = false;
   to.push(card);
   return card;
+}
+
+// ── Timing enforcement ────────────────────────────────────────────────────────
+
+const PHASE_NAMES: Record<string, string> = {
+  untap: 'Untap', upkeep: 'Upkeep', draw: 'Draw',
+  combat: 'Combat', end: 'End Step',
+};
+
+function checkPlayTiming(game: InternalGame, player: InternalPlayer, card: InternalCard): string | null {
+  const typeLine  = card.typeLine ?? '';
+  const oracle    = (card.oracleText ?? '').toLowerCase();
+
+  // Instant speed: type is Instant, OR card has the Flash keyword in oracle text
+  const isInstant = typeLine.includes('Instant') || oracle.includes('flash');
+  if (isInstant) return null; // Always legal
+
+  // Everything else is sorcery speed
+  const isYourTurn = game.turnOrder[game.activePlayerIndex] === player.socketId;
+
+  if (!isYourTurn) {
+    return `You can only play instants right now — it's ${
+      game.players.find((p) => p.socketId === game.turnOrder[game.activePlayerIndex])?.playerName ?? 'another player'
+    }'s turn.`;
+  }
+
+  const phase = game.phase;
+  if (phase !== 'main1' && phase !== 'main2') {
+    const phaseName = PHASE_NAMES[phase] ?? phase;
+    return `You can only play this during your Main Phase (currently ${phaseName}). Instants can be played at any time.`;
+  }
+
+  // Land drop — one per turn
+  if (typeLine.includes('Land')) {
+    if (player.landsPlayedThisTurn >= 1) {
+      return "You've already played a land this turn. You can only play one land per turn.";
+    }
+  }
+
+  return null; // All checks passed
 }
 
 // ── Socket handlers ───────────────────────────────────────────────────────────
@@ -384,11 +430,25 @@ io.on('connection', (socket) => {
     if (!game) return;
     const player = game.players.find((p) => p.socketId === socket.id);
     if (!player) return;
-    const card = moveCard(player.hand, player.battlefield, instanceId);
-    if (card) {
-      appendLog(game, `${player.playerName} played ${card.name}`);
-      broadcastGame(game);
+
+    const card = player.hand.find((c) => c.instanceId === instanceId);
+    if (!card) return;
+
+    const timingError = checkPlayTiming(game, player, card);
+    if (timingError) {
+      socket.emit('game:error', timingError);
+      return;
     }
+
+    const played = moveCard(player.hand, player.battlefield, instanceId);
+    if (!played) return;
+
+    if (played.typeLine.includes('Land')) {
+      player.landsPlayedThisTurn++;
+    }
+
+    appendLog(game, `${player.playerName} played ${played.name}`);
+    broadcastGame(game);
   });
 
   socket.on('game:tap_card', ({ instanceId }) => {
@@ -475,12 +535,21 @@ io.on('connection', (socket) => {
     if (!game) return;
     const player = game.players.find((p) => p.socketId === socket.id);
     if (!player || player.commandZone.length === 0) return;
-    const [commander] = player.commandZone.splice(0, 1);
-    player.battlefield.push(commander);
+
+    const commander = player.commandZone[0];
+    const timingError = checkPlayTiming(game, player, commander);
+    if (timingError) {
+      socket.emit('game:error', `Commander: ${timingError}`);
+      return;
+    }
+
+    const [castCard] = player.commandZone.splice(0, 1);
+    player.battlefield.push(castCard);
+    const commander_ref = castCard; // alias for log below
     const tax = player.commanderCastCount * 2;
     player.commanderCastCount++;
     const taxNote = tax > 0 ? ` (paid +${tax} commander tax)` : '';
-    appendLog(game, `${player.playerName} cast ${commander.name}${taxNote}`);
+    appendLog(game, `${player.playerName} cast ${commander_ref.name}${taxNote}`);
     broadcastGame(game);
   });
 
