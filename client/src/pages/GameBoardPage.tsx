@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { socket } from '../lib/socket';
-import type { PersonalGameState, PersonalPlayerState, GameCard, TurnPhase } from '@mtg-commander/types';
+import type { PersonalGameState, PersonalPlayerState, GameCard, TurnPhase } from '../lib/types';
 
 // ── Zone viewer modal ─────────────────────────────────────────────────────────
 
@@ -989,11 +989,11 @@ export default function GameBoardPage() {
     const isInstant = card.typeLine?.includes('Instant') ?? false;
     if (isInstant) return { playable: true, reason: 'Instant — can be played any time' };
     if (!isMyTurn) return { playable: false, reason: "It's not your turn — only instants can be played" };
-    if (gameState.phase !== 'main1' && gameState.phase !== 'main2') {
-      const phaseLabel = PHASES.find((p) => p.key === gameState.phase)?.label ?? gameState.phase;
+    if (gameState!.phase !== 'main1' && gameState!.phase !== 'main2') {
+      const phaseLabel = PHASES.find((p) => p.key === gameState!.phase)?.label ?? gameState!.phase;
       return { playable: false, reason: `Main Phase only — currently ${phaseLabel}` };
     }
-    if (card.typeLine?.includes('Land') && me.landsPlayedThisTurn >= 1) {
+    if (card.typeLine?.includes('Land') && me!.landsPlayedThisTurn >= 1) {
       return { playable: false, reason: 'Already played a land this turn' };
     }
     return { playable: true, reason: '' };
@@ -1002,14 +1002,14 @@ export default function GameBoardPage() {
   // ── Commander replacement interception ────────────────────────────────────────
 
   function interceptGraveyard(instanceId: string) {
-    const card = me.battlefield.find((c) => c.instanceId === instanceId);
+    const card = me!.battlefield.find((c) => c.instanceId === instanceId);
     if (card && commanderScryfallId.current && card.scryfallId === commanderScryfallId.current) {
       setCommanderPopup({ cardName: card.name, instanceId, destination: 'graveyard' });
     } else { emit.toGraveyard(instanceId); }
   }
 
   function interceptExile(instanceId: string) {
-    const card = me.battlefield.find((c) => c.instanceId === instanceId);
+    const card = me!.battlefield.find((c) => c.instanceId === instanceId);
     if (card && commanderScryfallId.current && card.scryfallId === commanderScryfallId.current) {
       setCommanderPopup({ cardName: card.name, instanceId, destination: 'exile' });
     } else { emit.toExile(instanceId); }

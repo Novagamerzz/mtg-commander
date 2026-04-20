@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { socket } from '../lib/socket';
-import type { Room } from '@mtg-commander/types';
+import type { Room } from '../lib/types';
 
 export default function LobbyPage() {
   const { user } = useAuth();

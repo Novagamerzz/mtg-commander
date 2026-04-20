@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { socket } from '../lib/socket';
 import { fetchCardsByIds } from '../lib/scryfall';
-import type { Room, DeckCardData } from '@mtg-commander/types';
+import type { Room, DeckCardData } from '../lib/types';
 
 interface SavedDeck {
   id: string;
