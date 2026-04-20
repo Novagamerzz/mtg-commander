@@ -16,8 +16,14 @@ import type {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const PORT = 3001;
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001;
+
+// Accept the Vercel client in production; fall back to local dev.
+const ALLOWED_ORIGINS: string[] = [
+  'http://localhost:5173',
+  'https://mtg-commander-client-drab.vercel.app',
+];
+if (process.env.CLIENT_URL) ALLOWED_ORIGINS.push(process.env.CLIENT_URL.trim());
 
 // ── Internal types (server-only, not sent to clients) ─────────────────────────
 
@@ -76,7 +82,7 @@ const socketToRoom = new Map<string, string>();
 // ── Express ───────────────────────────────────────────────────────────────────
 
 const app = express();
-app.use(cors({ origin: CLIENT_ORIGIN }));
+app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
 app.use(express.json());
 
 app.get('/health', (_req, res) => {
@@ -86,7 +92,7 @@ app.get('/health', (_req, res) => {
 
 const httpServer = createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
-  cors: { origin: CLIENT_ORIGIN, methods: ['GET', 'POST'] },
+  cors: { origin: ALLOWED_ORIGINS, methods: ['GET', 'POST'], credentials: true },
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -652,5 +658,5 @@ function cleanupSocket(socketId: string) {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 httpServer.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
+  console.log(`Server listening on port ${PORT} — allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
 });
