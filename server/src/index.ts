@@ -590,6 +590,51 @@ io.on('connection', (socket) => {
     socket.emit('game:library_contents', player.library as GameCard[]);
   });
 
+  socket.on('game:shuffle_library', () => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    player.library = shuffle(player.library);
+    appendLog(game, `${player.playerName} shuffled their library`);
+    broadcastGame(game);
+  });
+
+  socket.on('game:create_token', ({ name, power, toughness, color, typeLine, imageUri }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    const token: InternalCard = {
+      instanceId: randomUUID(),
+      scryfallId: `token-${randomUUID()}`,
+      name,
+      imageUri: imageUri ?? '',
+      typeLine,
+      oracleText: power && toughness ? `${power}/${toughness}` : '',
+      tapped: false,
+    };
+    player.battlefield.push(token);
+    appendLog(game, `${player.playerName} created ${name} token (${power}/${toughness})`);
+    broadcastGame(game);
+  });
+
+  socket.on('game:copy_card', ({ instanceId }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    // Search battlefield for the card to copy
+    const source =
+      player.battlefield.find((c) => c.instanceId === instanceId) ??
+      player.commandZone.find((c) => c.instanceId === instanceId);
+    if (!source) return;
+    const copy: InternalCard = { ...source, instanceId: randomUUID(), tapped: false };
+    player.battlefield.push(copy);
+    appendLog(game, `${player.playerName} copied ${source.name} onto the battlefield`);
+    broadcastGame(game);
+  });
+
   socket.on('game:tutor', ({ instanceId, to }) => {
     const game = getGame(socket.id);
     if (!game) return;

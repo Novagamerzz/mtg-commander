@@ -130,6 +130,8 @@ export interface ClientToServerEvents {
   'game:request_library': () => void;
   'game:tutor': (payload: { instanceId: string; to: 'hand' | 'battlefield' }) => void;
   'game:create_token': (payload: { name: string; power: string; toughness: string; color: string; typeLine: string; imageUri: string }) => void;
+  'game:copy_card': (payload: { instanceId: string }) => void;
+  'game:shuffle_library': () => void;
   'game:join': (payload: { gameId: string; playerName: string }) => void;
   'player:update_life': (payload: { delta: number }) => void;
   'chat:send': (message: string) => void;

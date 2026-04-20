@@ -300,10 +300,27 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
 
 // ── Canvas layout helpers ─────────────────────────────────────────────────────
 
-const C_W = 100, C_H = 140;    // card base size — 100 px wide, 1.4 ratio
-const C_LW = 80,  C_LH = 112;   // lands slightly smaller
-const C_HGAP = 12, C_RGAP = 18; // gaps
-const C_LBLW = 72;               // row-label column width
+const C_W_BASE = 140, C_H_BASE = 196;  // card base — 140px wide, 1.4 ratio
+const C_LW_BASE = 112, C_LH_BASE = 157; // lands slightly smaller
+const C_W_MIN = 88, C_H_MIN = 123;      // minimum when 8+ cards
+const C_LW_MIN = 72, C_LH_MIN = 101;
+const C_SCALE_THRESHOLD = 7;            // start scaling down past this many cards per row
+const C_HGAP = 12, C_RGAP = 20;
+const C_LBLW = 80;
+
+function cardSizeForRow(count: number, isLand: boolean): { cW: number; cH: number } {
+  const baseW = isLand ? C_LW_BASE : C_W_BASE;
+  const baseH = isLand ? C_LH_BASE : C_H_BASE;
+  const minW  = isLand ? C_LW_MIN  : C_W_MIN;
+  const minH  = isLand ? C_LH_MIN  : C_H_MIN;
+  if (count <= C_SCALE_THRESHOLD) return { cW: baseW, cH: baseH };
+  // Linear scale-down from threshold to 2× threshold
+  const t = Math.min(1, (count - C_SCALE_THRESHOLD) / C_SCALE_THRESHOLD);
+  return {
+    cW: Math.round(baseW + (minW - baseW) * t),
+    cH: Math.round(baseH + (minH - baseH) * t),
+  };
+}
 
 // Zone colors: [me, op1, op2, op3]
 const ZONE_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7'];
@@ -323,8 +340,7 @@ function buildCRows(cards: GameCard[]): CRow[] {
   const out: CRow[] = [];
   let ry = 0;
   for (const { label, cards: rc, isLand } of groupByType(cards)) {
-    const cW = isLand ? C_LW : C_W;
-    const cH = isLand ? C_LH : C_H;
+    const { cW, cH } = cardSizeForRow(rc.length, isLand);
     out.push({
       label, isLand, y: ry, cW, cH,
       slots: rc.map((c, i) => ({ id: c.instanceId, x: C_LBLW + i * (cW + C_HGAP) })),
@@ -449,12 +465,13 @@ interface TableCanvasProps {
   onPlayCard: (id: string) => void;
   onHover: (c: GameCard) => void;
   onHoverEnd: () => void;
+  onBfCardHover: (id: string | null) => void; // for C-key copy tracking
 }
 
 function TableCanvas({
   me, opponents,
   onTapCard, onGraveyardCard, onExileCard, onReturnCmdCard, onDragStartCard,
-  onPlayCard, onHover, onHoverEnd,
+  onPlayCard, onHover, onHoverEnd, onBfCardHover,
 }: TableCanvasProps) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(0.4);
@@ -685,7 +702,8 @@ function TableCanvas({
                       onExile={() => onExileCard(card.instanceId)}
                       onReturnCommander={() => onReturnCmdCard(card.instanceId)}
                       onDragStart={e => onDragStartCard(e, card.instanceId)}
-                      onHover={onHover} onHoverEnd={onHoverEnd}
+                      onHover={(c) => { onBfCardHover(c.instanceId); onHover(c); }}
+                      onHoverEnd={() => { onBfCardHover(null); onHoverEnd(); }}
                     />
                   </div>
                 );
@@ -778,12 +796,45 @@ const TOKEN_COLOR_SWATCHES: Record<TokenColor, string> = {
   white: '#cfc08a', blue: '#4a7eb5', black: '#7a4ab4', red: '#c44a4a', green: '#4a9a5a', colorless: '#7a7a8a',
 };
 
-const TOKEN_PRESETS = [
-  { name: 'Saproling', power: '1', toughness: '1', color: 'green' as TokenColor, typeLine: 'Token Creature — Saproling' },
-  { name: 'Zombie',    power: '2', toughness: '2', color: 'black' as TokenColor, typeLine: 'Token Creature — Zombie'    },
-  { name: 'Human',     power: '1', toughness: '1', color: 'white' as TokenColor, typeLine: 'Token Creature — Human'     },
-  { name: 'Beast',     power: '3', toughness: '3', color: 'green' as TokenColor, typeLine: 'Token Creature — Beast'     },
-  { name: 'Goblin',    power: '1', toughness: '1', color: 'red'   as TokenColor, typeLine: 'Token Creature — Goblin'    },
+const TOKEN_PRESETS: { name: string; power: string; toughness: string; color: TokenColor; typeLine: string }[] = [
+  // ── Green
+  { name: 'Saproling',  power: '1', toughness: '1', color: 'green',     typeLine: 'Token Creature — Saproling' },
+  { name: 'Elf',        power: '1', toughness: '1', color: 'green',     typeLine: 'Token Creature — Elf' },
+  { name: 'Snake',      power: '1', toughness: '1', color: 'green',     typeLine: 'Token Creature — Snake' },
+  { name: 'Bear',       power: '2', toughness: '2', color: 'green',     typeLine: 'Token Creature — Bear' },
+  { name: 'Wolf',       power: '2', toughness: '2', color: 'green',     typeLine: 'Token Creature — Wolf' },
+  { name: 'Beast',      power: '3', toughness: '3', color: 'green',     typeLine: 'Token Creature — Beast' },
+  { name: 'Elephant',   power: '3', toughness: '3', color: 'green',     typeLine: 'Token Creature — Elephant' },
+  { name: 'Elemental',  power: '4', toughness: '4', color: 'green',     typeLine: 'Token Creature — Elemental' },
+  { name: 'Wurm',       power: '5', toughness: '5', color: 'green',     typeLine: 'Token Creature — Wurm' },
+  { name: 'Wurm',       power: '6', toughness: '6', color: 'green',     typeLine: 'Token Creature — Wurm' },
+  // ── White
+  { name: 'Human',      power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Human' },
+  { name: 'Cat',        power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Cat' },
+  { name: 'Soldier',    power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Soldier' },
+  { name: 'Spirit',     power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Spirit (Flying)' },
+  { name: 'Egg',        power: '0', toughness: '1', color: 'white',     typeLine: 'Token Creature — Egg' },
+  { name: 'Knight',     power: '2', toughness: '2', color: 'white',     typeLine: 'Token Creature — Knight (Vigilance)' },
+  { name: 'Angel',      power: '3', toughness: '3', color: 'white',     typeLine: 'Token Creature — Angel (Flying, Vigilance)' },
+  // ── Black
+  { name: 'Zombie',     power: '1', toughness: '1', color: 'black',     typeLine: 'Token Creature — Zombie' },
+  { name: 'Zombie',     power: '2', toughness: '2', color: 'black',     typeLine: 'Token Creature — Zombie' },
+  { name: 'Rat',        power: '1', toughness: '1', color: 'black',     typeLine: 'Token Creature — Rat' },
+  // ── Red
+  { name: 'Goblin',     power: '1', toughness: '1', color: 'red',       typeLine: 'Token Creature — Goblin' },
+  { name: 'Devil',      power: '1', toughness: '1', color: 'red',       typeLine: 'Token Creature — Devil' },
+  { name: 'Dragon',     power: '2', toughness: '2', color: 'red',       typeLine: 'Token Creature — Dragon (Flying)' },
+  { name: 'Dragon',     power: '4', toughness: '4', color: 'red',       typeLine: 'Token Creature — Dragon (Flying)' },
+  // ── Blue
+  { name: 'Bird',       power: '1', toughness: '1', color: 'blue',      typeLine: 'Token Creature — Bird (Flying)' },
+  { name: 'Drake',      power: '2', toughness: '2', color: 'blue',      typeLine: 'Token Creature — Drake (Flying)' },
+  // ── Colorless artifacts
+  { name: 'Thopter',    power: '1', toughness: '1', color: 'colorless', typeLine: 'Token Artifact Creature — Thopter (Flying)' },
+  { name: 'Treasure',   power: '0', toughness: '0', color: 'colorless', typeLine: 'Token Artifact — Treasure' },
+  { name: 'Food',       power: '0', toughness: '0', color: 'colorless', typeLine: 'Token Artifact — Food' },
+  { name: 'Clue',       power: '0', toughness: '0', color: 'colorless', typeLine: 'Token Artifact — Clue' },
+  { name: 'Gold',       power: '0', toughness: '0', color: 'colorless', typeLine: 'Token Artifact — Gold' },
+  { name: 'Blood',      power: '0', toughness: '0', color: 'colorless', typeLine: 'Token Artifact — Blood' },
 ];
 
 function TokenCreateModal({ onClose, onCreate }: {
@@ -812,16 +863,18 @@ function TokenCreateModal({ onClose, onCreate }: {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>Quick Presets</p>
-          <div className="flex flex-wrap gap-1.5">
-            {TOKEN_PRESETS.map((p) => (
-              <button key={p.name}
-                onClick={() => { setName(p.name); setPower(p.power); setToughness(p.toughness); setColor(p.color); setTypeLine(p.typeLine); }}
-                className="text-xs px-2.5 py-1 rounded-lg transition hover:brightness-110"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#d1d5db' }}>
-                {p.power}/{p.toughness} {p.name}
-              </button>
-            ))}
+          <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>Presets</p>
+          <div className="overflow-y-auto" style={{ maxHeight: 160 }}>
+            <div className="flex flex-wrap gap-1.5">
+              {TOKEN_PRESETS.map((p, idx) => (
+                <button key={idx}
+                  onClick={() => { setName(p.name); setPower(p.power); setToughness(p.toughness); setColor(p.color); setTypeLine(p.typeLine); }}
+                  className="text-xs px-2 py-1 rounded-lg transition hover:brightness-110"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#d1d5db', whiteSpace: 'nowrap' }}>
+                  {p.power !== '0' || p.toughness !== '0' ? `${p.power}/${p.toughness} ` : ''}{p.name}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -893,6 +946,7 @@ export default function GameBoardPage() {
   const [hoverCard, setHoverCard] = useState<GameCard | null>(null);
   const [mouse, setMouse] = useState({ x: 0, y: 0 });
   const [showTokenModal, setShowTokenModal] = useState(false);
+  const hoverBfCardId = useRef<string | null>(null); // tracks which battlefield card is hovered for C-key copy
 
   const [zoneModal, setZoneModal] = useState<'graveyard' | 'exile' | 'library' | null>(null);
   const [libraryCards, setLibraryCards] = useState<GameCard[]>([]);
@@ -931,9 +985,30 @@ export default function GameBoardPage() {
     }
   }, [gameState]);
 
+  // C key: copy the currently-hovered battlefield card
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'c' || e.key === 'C') {
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+        if (hoverBfCardId.current) socket.emit('game:copy_card', { instanceId: hoverBfCardId.current });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   function openLibraryModal() {
     setZoneModal('library'); setLibraryCards([]); setLibraryLoading(true);
     socket.emit('game:request_library');
+  }
+
+  function closeLibraryModal() {
+    setZoneModal(null);
+    socket.emit('game:shuffle_library');
+    // Show "Library shuffled" in the toast
+    setTimingToast('📚 Library shuffled');
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setTimingToast(null), 2500);
   }
 
   if (!gameState) {
@@ -983,6 +1058,8 @@ export default function GameBoardPage() {
       const imageUri = makeTokenImageUri(name, `${power}/${toughness}`, color);
       socket.emit('game:create_token', { name, power, toughness, color, typeLine, imageUri });
     },
+    copyCard:     (instanceId: string) => socket.emit('game:copy_card', { instanceId }),
+    shuffleLibrary: () => socket.emit('game:shuffle_library'),
   };
 
   // ── Timing helper ─────────────────────────────────────────────────────────────
@@ -1089,6 +1166,7 @@ export default function GameBoardPage() {
           onPlayCard={emit.playCard}
           onHover={setHoverCard}
           onHoverEnd={() => setHoverCard(null)}
+          onBfCardHover={(id) => { hoverBfCardId.current = id; }}
         />
       </div>
 
@@ -1191,7 +1269,7 @@ export default function GameBoardPage() {
 
       {/* ── My hand (pinned at bottom) ── */}
       <div className="shrink-0 flex items-end gap-2 px-5 pb-3 pt-1 overflow-x-auto"
-        style={{ height: 124, borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.3)' }}>
+        style={{ height: 148, borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.3)' }}>
         {me.hand.length === 0 ? (
           <p className="text-xs italic self-center w-full text-center" style={{ color: 'rgba(255,255,255,0.08)' }}>
             Hand empty — click Draw to draw a card
@@ -1207,7 +1285,7 @@ export default function GameBoardPage() {
                 onMouseEnter={() => setHoverCard(card)}
                 onMouseLeave={() => setHoverCard(null)}
                 className="shrink-0 transition-transform duration-150 origin-bottom relative group/card"
-                style={{ width: 76, cursor: playable ? 'grab' : 'not-allowed', opacity: playable ? 1 : 0.45 }}
+                style={{ width: 100, cursor: playable ? 'grab' : 'not-allowed', opacity: playable ? 1 : 0.45 }}
                 onMouseOver={(e) => {
                   if (playable) (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-16px) scale(1.08)';
                 }}
@@ -1219,7 +1297,7 @@ export default function GameBoardPage() {
                 {card.imageUri
                   ? <img src={card.imageUri} alt={card.name} className="w-full rounded-xl"
                       style={{ boxShadow: '0 8px 20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08)' }} />
-                  : <CardBack style={{ width: 76, height: 106 }} />}
+                  : <CardBack style={{ width: 100, height: 140 }} />}
                 {!playable && (
                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/card:block z-20 pointer-events-none"
                     style={{ width: 140 }}>
@@ -1272,7 +1350,7 @@ export default function GameBoardPage() {
       )}
       {zoneModal === 'library' && (
         <ZoneModal title="Library Search" cards={libraryCards} loading={libraryLoading}
-          onClose={() => setZoneModal(null)} actions={[
+          onClose={closeLibraryModal} actions={[
             { label: '↩ Tutor to Hand',      color: '#86efac', onCard: (c) => emit.tutor(c.instanceId, 'hand') },
             { label: '⚡ Put on Battlefield', color: '#fbbf24', onCard: (c) => emit.tutor(c.instanceId, 'battlefield') },
           ]} />
