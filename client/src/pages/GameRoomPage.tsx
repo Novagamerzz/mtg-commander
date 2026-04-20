@@ -23,6 +23,8 @@ export default function GameRoomPage() {
   const [loadingDeck, setLoadingDeck] = useState(false);
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
+  const [firstPlayer, setFirstPlayer] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const playerName = user?.user_metadata?.username ?? user?.email?.split('@')[0] ?? 'Player';
   const mySocketId = socket.id ?? '';
@@ -47,16 +49,16 @@ export default function GameRoomPage() {
 
     socket.on('room:updated', setRoom);
     socket.on('room:error', (msg) => setError(msg));
-
-    // Navigate to game board when game starts
-    socket.on('game:state', () => {
-      navigate(`/game/${roomId}`);
+    socket.on('game:first_player', ({ playerName: fp }) => {
+      setFirstPlayer(fp);
+      // Navigate to game board after the announcement
+      setTimeout(() => navigate(`/game/${roomId}`), 3000);
     });
 
     return () => {
       socket.off('room:updated', setRoom);
       socket.off('room:error');
-      socket.off('game:state');
+      socket.off('game:first_player');
     };
   }, [roomId, navigate]);
 
@@ -110,8 +112,29 @@ export default function GameRoomPage() {
     navigate('/lobby');
   }
 
+  function copyInviteLink() {
+    const url = `${window.location.origin}/room/${roomId}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
   return (
     <div className="min-h-screen p-6 max-w-2xl mx-auto flex flex-col gap-6">
+
+      {/* First-player announcement overlay */}
+      {firstPlayer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md">
+          <div className="flex flex-col items-center gap-4 text-center animate-bounce">
+            <span className="text-7xl">🎲</span>
+            <p className="text-3xl font-black text-yellow-400">{firstPlayer}</p>
+            <p className="text-xl font-bold text-white">goes first!</p>
+            <p className="text-sm text-gray-500 mt-2">Starting game…</p>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-yellow-600">
@@ -119,13 +142,28 @@ export default function GameRoomPage() {
           </h1>
           <p className="text-gray-600 text-xs mt-0.5 font-mono truncate">{roomId}</p>
         </div>
-        <button
-          onClick={leaveRoom}
-          className="text-sm text-gray-500 hover:text-red-400 transition"
-        >
-          Leave
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={copyInviteLink}
+            className="text-xs text-gray-500 hover:text-yellow-400 border border-gray-700 hover:border-yellow-700 px-3 py-1.5 rounded-lg transition"
+          >
+            {copied ? '✓ Copied!' : '🔗 Copy Invite Link'}
+          </button>
+          <button onClick={leaveRoom} className="text-sm text-gray-500 hover:text-red-400 transition">
+            Leave
+          </button>
+        </div>
       </div>
+
+      {/* Host room settings */}
+      {isHost && room?.hasPassword && (
+        <div className="bg-yellow-950/20 border border-yellow-900/40 rounded-xl px-4 py-3 flex items-center gap-3 text-sm">
+          <span className="text-yellow-600">🔒</span>
+          <span className="text-gray-400">Room password:</span>
+          <span className="font-mono text-yellow-400 font-semibold">{room?.password ?? '••••••'}</span>
+          <span className="text-gray-600 text-xs ml-auto">Only you can see this</span>
+        </div>
+      )}
 
       {/* Players */}
       <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">

@@ -74,6 +74,7 @@ interface InternalRoom {
   players: InternalRoomPlayer[];
   status: 'waiting' | 'in_progress';
   createdAt: number;
+  password?: string;
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -128,6 +129,8 @@ function toPublicRoom(room: InternalRoom): Room {
     })),
     status: room.status,
     createdAt: room.createdAt,
+    hasPassword: !!room.password,
+    password: room.password, // visible in room state so host can share it
   };
 }
 
@@ -338,7 +341,7 @@ io.on('connection', (socket) => {
     socket.emit('lobby:rooms', publicRooms);
   });
 
-  socket.on('lobby:create_room', ({ playerName, userId }) => {
+  socket.on('lobby:create_room', ({ playerName, userId, password }) => {
     const roomId = randomUUID();
     const room: InternalRoom = {
       id: roomId,
@@ -347,6 +350,7 @@ io.on('connection', (socket) => {
       players: [{ socketId: socket.id, userId, playerName, deckId: null, deckName: null, deckCards: [] }],
       status: 'waiting',
       createdAt: Date.now(),
+      password: password?.trim() || undefined,
     };
     rooms.set(roomId, room);
     socketToRoom.set(socket.id, roomId);
@@ -357,10 +361,14 @@ io.on('connection', (socket) => {
     console.log(`[room:create] ${playerName} → ${roomId}`);
   });
 
-  socket.on('lobby:join_room', ({ roomId, playerName, userId }) => {
+  socket.on('lobby:join_room', ({ roomId, playerName, userId, password }) => {
     const room = rooms.get(roomId);
     if (!room || room.status === 'in_progress' || room.players.length >= 4) {
       socket.emit('room:error', 'Cannot join this room.');
+      return;
+    }
+    if (room.password && room.password !== password?.trim()) {
+      socket.emit('room:error', 'Incorrect password.');
       return;
     }
     if (room.players.some((p) => p.socketId === socket.id)) {
@@ -403,11 +411,16 @@ io.on('connection', (socket) => {
       return;
     }
     room.status = 'in_progress';
+    // Shuffle seating so first player is random
+    room.players = shuffle(room.players);
     const game = createGame(room);
     games.set(roomId!, game);
+    const firstPlayerName = game.players[0].playerName;
+    // Announce the first player to everyone in the room before the game state arrives
+    io.to(roomId!).emit('game:first_player', { playerName: firstPlayerName });
     broadcastGame(game);
     broadcastLobby();
-    console.log(`[game:start] room ${roomId} — ${room.players.length} players`);
+    console.log(`[game:start] room ${roomId} — ${room.players.length} players, ${firstPlayerName} goes first`);
   });
 
   socket.on('room:leave', () => {

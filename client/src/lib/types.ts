@@ -60,6 +60,8 @@ export interface Room {
   players: RoomPlayer[];
   status: 'waiting' | 'in_progress';
   createdAt: number;
+  hasPassword?: boolean;
+  password?: string;
 }
 
 // ── Game State ────────────────────────────────────────────────────────────────
@@ -99,6 +101,7 @@ export interface PersonalGameState {
 
 export interface ServerToClientEvents {
   'lobby:rooms': (rooms: Room[]) => void;
+  'game:first_player': (data: { playerName: string }) => void;
   'room:updated': (room: Room) => void;
   'room:error': (message: string) => void;
   'game:state': (state: PersonalGameState) => void;
@@ -111,8 +114,8 @@ export interface ServerToClientEvents {
 
 export interface ClientToServerEvents {
   'lobby:subscribe': () => void;
-  'lobby:create_room': (payload: { playerName: string; userId: string }) => void;
-  'lobby:join_room': (payload: { roomId: string; playerName: string; userId: string }) => void;
+  'lobby:create_room': (payload: { playerName: string; userId: string; password?: string }) => void;
+  'lobby:join_room': (payload: { roomId: string; playerName: string; userId: string; password?: string }) => void;
   'room:select_deck': (payload: { deckId: string; deckName: string; cards: DeckCardData[] }) => void;
   'room:start_game': () => void;
   'room:leave': () => void;

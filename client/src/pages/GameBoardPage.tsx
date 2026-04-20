@@ -287,6 +287,14 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
   const [ptPow, setPtPow] = useState('');
   const [ptTou, setPtTou] = useState('');
 
+  // Close menu on Escape
+  useEffect(() => {
+    if (!menuMode) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuMode(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuMode]);
+
   const counters = card.counters ?? {};
   const hasCounters = Object.values(counters).some((n) => n > 0);
   const hasPtOverride = card.powerOverride != null || card.toughnessOverride != null;
@@ -344,12 +352,30 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
         style={{ background: '#374151', border: '1px solid #4b5563', color: '#d1d5db' }}
         onClick={(e) => { e.stopPropagation(); openMenu(); }}>⋮</button>
 
+      {/* Backdrop — captures clicks outside the menu to close it */}
+      {menuMode !== null && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 29 }}
+          onMouseDown={() => setMenuMode(null)} />
+      )}
+
       {/* Main menu */}
       {menuMode === 'main' && (
         <div className="absolute top-5 right-0 rounded-xl z-30 py-1"
           style={{ width: 192, background: '#0f172a', border: '1px solid #1e293b',
             boxShadow: '0 24px 48px rgba(0,0,0,0.9)' }}
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}>
+
+          {/* Header row with X */}
+          <div style={{ display: 'flex', alignItems: 'center', padding: '2px 8px 4px 12px',
+            borderBottom: '1px solid #1e293b', marginBottom: 2 }}>
+            <span style={{ fontSize: 9, color: '#475569', fontWeight: 700, letterSpacing: 1, flex: 1 }}>
+              {card.name.split(',')[0].slice(0, 20)}
+            </span>
+            <button onClick={closeMenu}
+              style={{ color: '#475569', fontSize: 14, lineHeight: 1, padding: '2px 4px',
+                cursor: 'pointer', background: 'none', border: 'none' }}>✕</button>
+          </div>
 
           {/* Basic actions */}
           {[
@@ -408,6 +434,7 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
         <div className="absolute top-5 right-0 rounded-xl z-30 p-3"
           style={{ width: 192, background: '#0f172a', border: '1px solid #1e293b',
             boxShadow: '0 24px 48px rgba(0,0,0,0.9)' }}
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}>
           <p style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, marginBottom: 8 }}>Set P/T for {card.name.split(',')[0]}</p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
