@@ -20,12 +20,12 @@ export default function HomePage() {
             >
               My Profile
             </Link>
-            <button
+            <Link
+              to="/lobby"
               className="bg-gray-800 hover:bg-gray-700 text-gray-200 font-semibold px-6 py-2.5 rounded-lg transition"
-              disabled
             >
-              Find Game (soon)
-            </button>
+              Play Now
+            </Link>
           </>
         ) : (
           <>
