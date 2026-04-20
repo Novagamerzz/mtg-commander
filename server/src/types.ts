@@ -28,6 +28,9 @@ export interface GameCard {
   imageUri: string;
   typeLine: string;
   tapped: boolean;
+  counters?: Record<string, number>;
+  powerOverride?: string | null;
+  toughnessOverride?: string | null;
 }
 
 export interface DeckCardData {
@@ -132,6 +135,8 @@ export interface ClientToServerEvents {
   'game:create_token': (payload: { name: string; power: string; toughness: string; color: string; typeLine: string; imageUri: string }) => void;
   'game:copy_card': (payload: { instanceId: string }) => void;
   'game:shuffle_library': () => void;
+  'game:update_counter': (payload: { instanceId: string; counter: string; delta: number }) => void;
+  'game:set_pt': (payload: { instanceId: string; power: string; toughness: string }) => void;
   'game:join': (payload: { gameId: string; playerName: string }) => void;
   'player:update_life': (payload: { delta: number }) => void;
   'chat:send': (message: string) => void;

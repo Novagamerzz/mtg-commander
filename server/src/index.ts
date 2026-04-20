@@ -30,6 +30,9 @@ if (process.env.CLIENT_URL) ALLOWED_ORIGINS.push(process.env.CLIENT_URL.trim());
 interface InternalCard {
   instanceId: string; scryfallId: string;
   name: string; imageUri: string; typeLine: string; oracleText: string; tapped: boolean;
+  counters?: Record<string, number>;
+  powerOverride?: string | null;
+  toughnessOverride?: string | null;
 }
 
 interface InternalPlayer {
@@ -590,6 +593,37 @@ io.on('connection', (socket) => {
     socket.emit('game:library_contents', player.library as GameCard[]);
   });
 
+  socket.on('game:update_counter', ({ instanceId, counter, delta }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    const card = player.battlefield.find((c) => c.instanceId === instanceId);
+    if (!card) return;
+    if (!card.counters) card.counters = {};
+    card.counters[counter] = Math.max(0, (card.counters[counter] ?? 0) + delta);
+    if (card.counters[counter] === 0) delete card.counters[counter];
+    if (delta !== 0) {
+      appendLog(game, `${player.playerName}: ${card.name} ${delta > 0 ? '+' : ''}${delta} ${counter} counter`);
+      broadcastGame(game);
+    }
+  });
+
+  socket.on('game:set_pt', ({ instanceId, power, toughness }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    const card = player.battlefield.find((c) => c.instanceId === instanceId);
+    if (!card) return;
+    card.powerOverride = power || null;
+    card.toughnessOverride = toughness || null;
+    if (power || toughness) {
+      appendLog(game, `${player.playerName}: ${card.name} P/T set to ${power || '?'}/${toughness || '?'}`);
+    }
+    broadcastGame(game);
+  });
+
   socket.on('game:shuffle_library', () => {
     const game = getGame(socket.id);
     if (!game) return;
@@ -629,7 +663,7 @@ io.on('connection', (socket) => {
       player.battlefield.find((c) => c.instanceId === instanceId) ??
       player.commandZone.find((c) => c.instanceId === instanceId);
     if (!source) return;
-    const copy: InternalCard = { ...source, instanceId: randomUUID(), tapped: false };
+    const copy: InternalCard = { ...source, instanceId: randomUUID(), tapped: false, counters: {}, powerOverride: null, toughnessOverride: null };
     player.battlefield.push(copy);
     appendLog(game, `${player.playerName} copied ${source.name} onto the battlefield`);
     broadcastGame(game);
