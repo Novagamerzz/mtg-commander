@@ -76,6 +76,7 @@ export interface PersonalPlayerState {
   exile: GameCard[];
   libraryCount: number;
   isActive: boolean;
+  commanderCastCount: number; // times commander has been cast (tax = count * 2)
 }
 
 export interface PersonalGameState {
@@ -100,6 +101,7 @@ export interface ServerToClientEvents {
   // Game
   'game:state': (state: PersonalGameState) => void;
   'game:error': (message: string) => void;
+  'game:library_contents': (cards: GameCard[]) => void;
   // Legacy
   'player:joined': (player: Player) => void;
   'player:left': (playerId: string) => void;
@@ -126,7 +128,12 @@ export interface ClientToServerEvents {
   'game:update_commander_damage': (payload: { fromSocketId: string; delta: number }) => void;
   'game:move_to_graveyard': (payload: { instanceId: string }) => void;
   'game:move_to_exile': (payload: { instanceId: string }) => void;
+  'game:move_to_hand': (payload: { instanceId: string }) => void;
+  'game:return_to_battlefield': (payload: { instanceId: string }) => void;
   'game:return_commander': (payload: { instanceId: string }) => void;
+  'game:cast_commander': () => void;
+  'game:request_library': () => void;
+  'game:tutor': (payload: { instanceId: string; to: 'hand' | 'battlefield' }) => void;
   // Legacy
   'game:join': (payload: { gameId: string; playerName: string }) => void;
   'player:update_life': (payload: { delta: number }) => void;

@@ -37,6 +37,7 @@ interface InternalPlayer {
   graveyard: InternalCard[];
   exile: InternalCard[];
   library: InternalCard[];
+  commanderCastCount: number;
 }
 
 interface InternalGame {
@@ -143,6 +144,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
       exile: p.exile as GameCard[],
       libraryCount: p.library.length,
       isActive: i === game.activePlayerIndex,
+      commanderCastCount: p.commanderCastCount,
     })),
   };
 }
@@ -213,6 +215,7 @@ function createGame(room: InternalRoom): InternalGame {
       graveyard: [],
       exile: [],
       library: libraryCards,
+      commanderCastCount: 0,
     };
   });
 
@@ -463,6 +466,72 @@ io.on('connection', (socket) => {
       const card = moveCard(zone, player.commandZone, instanceId);
       if (card) { appendLog(game, `${player.playerName}: ${card.name} → command zone`); broadcastGame(game); return; }
     }
+  });
+
+  // ─── Three new handlers ───────────────────────────────────────────────────────
+
+  socket.on('game:cast_commander', () => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player || player.commandZone.length === 0) return;
+    const [commander] = player.commandZone.splice(0, 1);
+    player.battlefield.push(commander);
+    const tax = player.commanderCastCount * 2;
+    player.commanderCastCount++;
+    const taxNote = tax > 0 ? ` (paid +${tax} commander tax)` : '';
+    appendLog(game, `${player.playerName} cast ${commander.name}${taxNote}`);
+    broadcastGame(game);
+  });
+
+  socket.on('game:move_to_hand', ({ instanceId }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    for (const zone of [player.graveyard, player.exile]) {
+      const card = moveCard(zone, player.hand, instanceId);
+      if (card) { appendLog(game, `${player.playerName}: ${card.name} → hand`); broadcastGame(game); return; }
+    }
+  });
+
+  socket.on('game:return_to_battlefield', ({ instanceId }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    for (const zone of [player.graveyard, player.exile]) {
+      const card = moveCard(zone, player.battlefield, instanceId);
+      if (card) { appendLog(game, `${player.playerName}: ${card.name} → battlefield`); broadcastGame(game); return; }
+    }
+  });
+
+  socket.on('game:request_library', () => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    // Send library only to requesting socket — private to that player
+    socket.emit('game:library_contents', player.library as GameCard[]);
+  });
+
+  socket.on('game:tutor', ({ instanceId, to }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    const idx = player.library.findIndex((c) => c.instanceId === instanceId);
+    if (idx === -1) return;
+    const [card] = player.library.splice(idx, 1);
+    player.library = shuffle(player.library); // shuffle after tutoring
+    if (to === 'hand') {
+      player.hand.push(card);
+      appendLog(game, `${player.playerName} tutored ${card.name} → hand`);
+    } else {
+      player.battlefield.push(card);
+      appendLog(game, `${player.playerName} put ${card.name} onto the battlefield`);
+    }
+    broadcastGame(game);
   });
 
   // ─── Disconnect ───────────────────────────────────────────────────────────────

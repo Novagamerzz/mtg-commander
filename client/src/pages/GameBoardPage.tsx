@@ -3,6 +3,119 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { socket } from '../lib/socket';
 import type { PersonalGameState, PersonalPlayerState, GameCard, TurnPhase } from '@mtg-commander/types';
 
+// ── Zone viewer modal ─────────────────────────────────────────────────────────
+
+interface ZoneAction {
+  label: string;
+  color?: string;
+  onCard: (card: GameCard) => void;
+}
+
+function ZoneModal({
+  title, cards, loading = false, actions, onClose,
+}: {
+  title: string;
+  cards: GameCard[];
+  loading?: boolean;
+  actions: ZoneAction[];
+  onClose: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const filtered = cards.filter((c) =>
+    c.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(6px)' }}
+      onClick={onClose}
+    >
+      <div
+        className="flex flex-col rounded-2xl overflow-hidden"
+        style={{
+          width: '82vw', maxWidth: 960, maxHeight: '88vh',
+          background: '#0f172a',
+          border: '1px solid rgba(255,255,255,0.1)',
+          boxShadow: '0 40px 80px rgba(0,0,0,0.9)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-4 px-5 py-4 shrink-0"
+          style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <h2 className="text-lg font-bold text-white flex-1">{title}
+            <span className="text-sm font-normal ml-2" style={{ color: '#6b7280' }}>({cards.length} cards)</span>
+          </h2>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter cards…"
+            autoFocus
+            className="text-sm px-3 py-1.5 rounded-lg focus:outline-none"
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#e5e7eb', width: 180 }}
+          />
+          <button onClick={onClose}
+            className="text-xl w-8 h-8 flex items-center justify-center rounded-lg transition hover:bg-white/10"
+            style={{ color: '#6b7280' }}>
+            ×
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+          {loading ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="w-8 h-8 rounded-full border-2 border-yellow-500/40 border-t-yellow-500 animate-spin" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <p className="text-center py-16 text-sm" style={{ color: '#374151' }}>
+              {search ? `No cards matching "${search}"` : 'No cards here'}
+            </p>
+          ) : (
+            <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))' }}>
+              {filtered.map((card) => (
+                <div key={card.instanceId} className="flex flex-col gap-2">
+                  {/* Card image */}
+                  <div className="relative rounded-xl overflow-hidden" style={{ paddingBottom: '140%' }}>
+                    {card.imageUri ? (
+                      <img src={card.imageUri} alt={card.name}
+                        className="absolute inset-0 w-full h-full object-cover" />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center p-2"
+                        style={{ background: '#1e293b', border: '1px solid #334155' }}>
+                        <span className="text-xs text-center" style={{ color: '#64748b' }}>{card.name}</span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs font-medium truncate" style={{ color: '#cbd5e1' }} title={card.name}>
+                    {card.name}
+                  </p>
+                  {/* Action buttons */}
+                  <div className="flex flex-col gap-1">
+                    {actions.map((action) => (
+                      <button key={action.label}
+                        onClick={() => { action.onCard(card); onClose(); }}
+                        className="text-xs py-1 px-2 rounded-lg transition font-medium text-left"
+                        style={{
+                          background: 'rgba(255,255,255,0.04)',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          color: action.color ?? '#9ca3af',
+                        }}>
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const PHASES: { key: TurnPhase; label: string; short: string }[] = [
@@ -311,11 +424,12 @@ function DropZone({
 // ── Pile zone (graveyard or exile) ────────────────────────────────────────────
 
 function PileZone({
-  cards, label, isOver, onDragOver, onDragLeave, onDrop, onHover, onHoverEnd, accentColor,
+  cards, label, isOver, onDragOver, onDragLeave, onDrop, onHover, onHoverEnd, accentColor, onClick,
 }: {
   cards: GameCard[];
   label: string;
   isOver: boolean;
+  onClick?: () => void;
   onDragOver: () => void;
   onDragLeave: () => void;
   onDrop: (data: DragData) => void;
@@ -331,8 +445,10 @@ function PileZone({
         {label}
       </span>
       <div
-        className="relative rounded-lg overflow-hidden cursor-default transition-all duration-150"
+        className="relative rounded-lg overflow-hidden transition-all duration-150"
+        onClick={onClick}
         style={{
+          cursor: onClick ? 'pointer' : 'default',
           width: 52, height: 74,
           border: isOver ? `2px solid ${accentColor}` : '2px dashed rgba(255,255,255,0.12)',
           background: isOver ? `${accentColor}18` : 'rgba(0,0,0,0.3)',
@@ -515,12 +631,31 @@ export default function GameBoardPage() {
   const [overGy,  setOverGy]  = useState(false);
   const [overEx,  setOverEx]  = useState(false);
 
+  // Zone viewer modals
+  const [zoneModal, setZoneModal] = useState<'graveyard' | 'exile' | 'library' | null>(null);
+  const [libraryCards, setLibraryCards] = useState<GameCard[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+
   useEffect(() => {
     if (!socket.connected) socket.connect();
     socket.on('game:state', setGameState);
+    socket.on('game:library_contents', (cards) => {
+      setLibraryCards(cards);
+      setLibraryLoading(false);
+    });
     socket.emit('game:rejoin');
-    return () => { socket.off('game:state', setGameState); };
+    return () => {
+      socket.off('game:state', setGameState);
+      socket.off('game:library_contents');
+    };
   }, []);
+
+  function openLibraryModal() {
+    setZoneModal('library');
+    setLibraryCards([]);
+    setLibraryLoading(true);
+    socket.emit('game:request_library');
+  }
 
   if (!gameState) {
     return (
@@ -558,9 +693,13 @@ export default function GameBoardPage() {
     endTurn:     ()           => socket.emit('game:end_turn'),
     updateLife:  (d: number)  => socket.emit('game:update_life',          { delta: d }),
     updateCmdDmg:(f: string, d: number) => socket.emit('game:update_commander_damage', { fromSocketId: f, delta: d }),
-    toGraveyard: (id: string) => socket.emit('game:move_to_graveyard',    { instanceId: id }),
-    toExile:     (id: string) => socket.emit('game:move_to_exile',        { instanceId: id }),
-    returnCmd:   (id: string) => socket.emit('game:return_commander',     { instanceId: id }),
+    toGraveyard:   (id: string) => socket.emit('game:move_to_graveyard',    { instanceId: id }),
+    toExile:       (id: string) => socket.emit('game:move_to_exile',        { instanceId: id }),
+    toHand:        (id: string) => socket.emit('game:move_to_hand',         { instanceId: id }),
+    returnToBf:    (id: string) => socket.emit('game:return_to_battlefield', { instanceId: id }),
+    returnCmd:     (id: string) => socket.emit('game:return_commander',     { instanceId: id }),
+    castCommander: ()           => socket.emit('game:cast_commander'),
+    tutor:         (id: string, to: 'hand' | 'battlefield') => socket.emit('game:tutor', { instanceId: id, to }),
   };
 
   // ── Drag helpers ────────────────────────────────────────────────────────────
@@ -724,26 +863,51 @@ export default function GameBoardPage() {
               </button>
             </div>
 
-            {/* Commander portrait */}
-            {myCommander && (
+            {/* Commander portrait + Cast button */}
+            {(myCommander || me.commandZone.length === 0) && (
               <div className="flex items-center gap-3 shrink-0"
                 style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 20 }}>
-                <div
-                  className="rounded-lg overflow-hidden shrink-0 cursor-pointer"
-                  style={{ width: 38, height: 54, border: '1px solid rgba(250,204,21,0.4)',
-                    boxShadow: '0 0 10px rgba(250,204,21,0.2)' }}
-                  onMouseEnter={() => setHoverCard(myCommander)}
-                  onMouseLeave={() => setHoverCard(null)}
-                >
-                  {myCommander.imageUri
-                    ? <img src={myCommander.imageUri} className="w-full h-full object-cover" />
-                    : <CardBack style={{ width: '100%', height: '100%' }} />}
-                </div>
+                {myCommander && (
+                  <div
+                    className="rounded-lg overflow-hidden shrink-0 cursor-pointer"
+                    style={{ width: 38, height: 54, border: '1px solid rgba(250,204,21,0.4)',
+                      boxShadow: '0 0 10px rgba(250,204,21,0.2)' }}
+                    onMouseEnter={() => setHoverCard(myCommander)}
+                    onMouseLeave={() => setHoverCard(null)}
+                  >
+                    {myCommander.imageUri
+                      ? <img src={myCommander.imageUri} className="w-full h-full object-cover" />
+                      : <CardBack style={{ width: '100%', height: '100%' }} />}
+                  </div>
+                )}
                 <div>
                   <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#f59e0b' }}>Commander</p>
-                  <p className="text-sm font-semibold max-w-[130px] truncate" style={{ color: '#f3f4f6' }}>
-                    {myCommander.name}
+                  {myCommander ? (
+                    <p className="text-sm font-semibold max-w-[120px] truncate" style={{ color: '#f3f4f6' }}>
+                      {myCommander.name}
+                    </p>
+                  ) : (
+                    <p className="text-xs" style={{ color: '#6b7280' }}>On battlefield</p>
+                  )}
+                  {/* Commander tax info */}
+                  <p className="text-[9px] mt-0.5" style={{ color: me.commanderCastCount > 0 ? '#f97316' : '#4b5563' }}>
+                    Tax: +{me.commanderCastCount * 2}⧫ (cast {me.commanderCastCount}×)
                   </p>
+                  {/* Cast Commander button — only if in command zone */}
+                  {myCommander && (
+                    <button
+                      onClick={emit.castCommander}
+                      className="mt-1 text-[10px] font-bold px-2 py-0.5 rounded-md transition"
+                      style={{
+                        background: 'linear-gradient(135deg, #92400e, #78350f)',
+                        border: '1px solid rgba(250,204,21,0.3)',
+                        color: '#fbbf24',
+                        boxShadow: '0 0 6px rgba(250,204,21,0.2)',
+                      }}
+                    >
+                      ⚡ Cast Commander
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -758,13 +922,24 @@ export default function GameBoardPage() {
               <span className="text-base font-bold" style={{ color: '#f9fafb' }}>{me.playerName}</span>
             </div>
 
-            {/* Zone counts */}
-            <div className="ml-auto flex items-center gap-5 text-sm font-semibold shrink-0"
-              style={{ color: '#4b5563' }}>
-              <span title="Library">📚 {me.libraryCount}</span>
-              <span title="Hand">✋ {me.handCount}</span>
-              <span title={`${me.graveyard.length} cards in graveyard`}>🪦 {me.graveyard.length}</span>
-              <span title={`${me.exile.length} cards exiled`}>✦ {me.exile.length}</span>
+            {/* Zone counts — clickable to open viewer modals */}
+            <div className="ml-auto flex items-center gap-2 text-sm font-semibold shrink-0">
+              <button onClick={openLibraryModal} title="Search library"
+                className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
+                style={{ color: '#4b5563' }}>
+                📚 {me.libraryCount}
+              </button>
+              <span style={{ color: '#4b5563' }}>✋ {me.handCount}</span>
+              <button onClick={() => setZoneModal('graveyard')} title="View graveyard"
+                className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
+                style={{ color: me.graveyard.length > 0 ? '#9ca3af' : '#4b5563' }}>
+                🪦 {me.graveyard.length}
+              </button>
+              <button onClick={() => setZoneModal('exile')} title="View exile"
+                className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
+                style={{ color: me.exile.length > 0 ? '#a78bfa' : '#4b5563' }}>
+                ✦ {me.exile.length}
+              </button>
             </div>
           </div>
 
@@ -817,6 +992,7 @@ export default function GameBoardPage() {
                 onHover={setHoverCard}
                 onHoverEnd={() => setHoverCard(null)}
                 accentColor="#9ca3af"
+                onClick={() => setZoneModal('graveyard')}
               />
               <PileZone
                 cards={me.exile}
@@ -828,6 +1004,7 @@ export default function GameBoardPage() {
                 onHover={setHoverCard}
                 onHoverEnd={() => setHoverCard(null)}
                 accentColor="#a78bfa"
+                onClick={() => setZoneModal('exile')}
               />
             </div>
           </div>
@@ -887,6 +1064,45 @@ export default function GameBoardPage() {
 
       {/* Global card hover preview */}
       {hoverCard && <HoverPreview card={hoverCard} x={mouse.x} y={mouse.y} />}
+
+      {/* ── Zone viewer modals ── */}
+      {zoneModal === 'graveyard' && (
+        <ZoneModal
+          title="Graveyard"
+          cards={me.graveyard}
+          onClose={() => setZoneModal(null)}
+          actions={[
+            { label: '↩ Return to Hand',        color: '#86efac', onCard: (c) => emit.toHand(c.instanceId) },
+            { label: '⚡ Return to Battlefield', color: '#fbbf24', onCard: (c) => emit.returnToBf(c.instanceId) },
+            { label: '✦ Exile',                  color: '#a78bfa', onCard: (c) => emit.toExile(c.instanceId) },
+          ]}
+        />
+      )}
+
+      {zoneModal === 'exile' && (
+        <ZoneModal
+          title="Exile"
+          cards={me.exile}
+          onClose={() => setZoneModal(null)}
+          actions={[
+            { label: '↩ Return to Hand',        color: '#86efac', onCard: (c) => emit.toHand(c.instanceId) },
+            { label: '⚡ Return to Battlefield', color: '#fbbf24', onCard: (c) => emit.returnToBf(c.instanceId) },
+          ]}
+        />
+      )}
+
+      {zoneModal === 'library' && (
+        <ZoneModal
+          title="Library Search"
+          cards={libraryCards}
+          loading={libraryLoading}
+          onClose={() => setZoneModal(null)}
+          actions={[
+            { label: '↩ Tutor to Hand',      color: '#86efac', onCard: (c) => emit.tutor(c.instanceId, 'hand') },
+            { label: '⚡ Put on Battlefield', color: '#fbbf24', onCard: (c) => emit.tutor(c.instanceId, 'battlefield') },
+          ]}
+        />
+      )}
     </div>
   );
 }
