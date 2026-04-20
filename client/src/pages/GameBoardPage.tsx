@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { socket } from '../lib/socket';
 import type { PersonalGameState, PersonalPlayerState, GameCard, TurnPhase } from '@mtg-commander/types';
@@ -129,21 +129,22 @@ function CommanderReplacementPopup({ cardName, destination, onCommandZone, onSta
 
 // ── Battlefield row organisation ──────────────────────────────────────────────
 
-const TYPE_ROWS: { label: string; match: (t: string) => boolean }[] = [
-  { label: 'Lands',                  match: (t) => t.includes('Land') },
-  { label: 'Enchantments/Artifacts', match: (t) => !t.includes('Land') && !t.includes('Creature') && (t.includes('Enchantment') || t.includes('Artifact')) },
-  { label: 'Creatures',              match: (t) => t.includes('Creature') },
-  { label: 'Planeswalkers',          match: (t) => t.includes('Planeswalker') && !t.includes('Creature') },
-  { label: 'Other',                  match: (_) => true },
+const TYPE_ROWS: { label: string; match: (t: string) => boolean; isLand?: boolean }[] = [
+  { label: 'Creatures',     match: (t) => t.includes('Creature') },
+  { label: 'Artifacts',     match: (t) => !t.includes('Creature') && t.includes('Artifact') },
+  { label: 'Enchantments',  match: (t) => !t.includes('Creature') && !t.includes('Artifact') && t.includes('Enchantment') },
+  { label: 'Planeswalkers', match: (t) => t.includes('Planeswalker') && !t.includes('Creature') },
+  { label: 'Lands',         match: (t) => t.includes('Land'), isLand: true },
+  { label: 'Other',         match: (_) => true },
 ];
 
-function groupByType(cards: GameCard[]): { label: string; cards: GameCard[] }[] {
+function groupByType(cards: GameCard[]): { label: string; cards: GameCard[]; isLand: boolean }[] {
   const assigned = new Set<string>();
-  const rows: { label: string; cards: GameCard[] }[] = [];
-  for (const { label, match } of TYPE_ROWS) {
+  const rows: { label: string; cards: GameCard[]; isLand: boolean }[] = [];
+  for (const { label, match, isLand = false } of TYPE_ROWS) {
     const rowCards = cards.filter((c) => !assigned.has(c.instanceId) && match(c.typeLine));
     rowCards.forEach((c) => assigned.add(c.instanceId));
-    if (rowCards.length > 0) rows.push({ label, cards: rowCards });
+    if (rowCards.length > 0) rows.push({ label, cards: rowCards, isLand });
   }
   return rows;
 }
@@ -245,206 +246,17 @@ function TappedCardWrapper({ card, cardW, cardH, children, className = '' }: {
   );
 }
 
-// ── Opponent zone ─────────────────────────────────────────────────────────────
-
-function OpponentZone({ player, onHover, onHoverEnd }: {
-  player: PersonalPlayerState;
-  onHover: (c: GameCard) => void;
-  onHoverEnd: () => void;
-}) {
-  const commander = player.commandZone[0];
-  const life = player.life;
-  const lifeColor = life <= 0 ? '#dc2626' : life <= 10 ? '#f97316' : '#f9fafb';
-
-  // Group battlefield by type for opponents too
-  const rows = groupByType(player.battlefield);
-
-  return (
-    <div className="flex-1 min-w-0 rounded-xl flex flex-col overflow-hidden"
-      style={{
-        border: player.isActive ? '2px solid rgba(250,204,21,0.8)' : '1px solid rgba(255,255,255,0.08)',
-        background: player.isActive ? 'rgba(250,204,21,0.04)' : 'rgba(0,0,0,0.35)',
-        boxShadow: player.isActive ? '0 0 24px rgba(250,204,21,0.15)' : 'none',
-      }}>
-
-      {/* Header */}
-      <div className="flex items-center gap-3 px-3 py-2 shrink-0"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.2)' }}>
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          {player.isActive && (
-            <span className="w-2.5 h-2.5 rounded-full shrink-0 animate-pulse"
-              style={{ background: '#facc15', boxShadow: '0 0 6px #facc15' }} />
-          )}
-          <span className="font-bold text-xl text-white truncate">{player.playerName}</span>
-          {commander && <span className="text-xs truncate hidden md:block" style={{ color: '#f59e0b' }}>⚜ {commander.name.split(',')[0]}</span>}
-        </div>
-        {/* Larger, more readable life total */}
-        <span className="font-black font-mono tabular-nums shrink-0"
-          style={{ fontSize: '3rem', lineHeight: 1, color: lifeColor,
-            textShadow: life <= 10 ? `0 0 12px ${lifeColor}88` : 'none' }}>
-          {life}
-        </span>
-      </div>
-
-      {/* Hand: styled face-down backs */}
-      {player.handCount > 0 && (
-        <div className="flex items-center gap-2 px-3 py-1.5 shrink-0"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-          <div className="flex gap-0.5 items-end">
-            {Array.from({ length: Math.min(player.handCount, 14) }).map((_, i) => (
-              <CardBack key={i} style={{ width: 22, height: 30,
-                transform: `rotate(${(i - Math.min(player.handCount, 14) / 2) * 2}deg)` }} />
-            ))}
-          </div>
-          <span className="text-xs font-semibold ml-1" style={{ color: '#6b7280' }}>
-            {player.handCount} in hand
-          </span>
-        </div>
-      )}
-
-      {/* Battlefield — rows by type */}
-      <div className="flex-1 overflow-y-auto px-2 py-2 flex flex-col gap-2">
-        {rows.length === 0 ? (
-          <p className="text-[10px] italic text-center self-center" style={{ color: '#2d4a38' }}>Empty</p>
-        ) : (
-          rows.map(({ label, cards }) => (
-            <div key={label} className="flex items-start gap-1">
-              {/* Row label */}
-              <span className="text-[8px] font-bold uppercase tracking-widest shrink-0 pt-1 w-12 text-right pr-1"
-                style={{ color: 'rgba(255,255,255,0.18)' }}>
-                {label.split('/')[0]}
-              </span>
-              {/* Cards — larger thumbnails (46×66) */}
-              <div className="flex flex-wrap gap-1.5" style={{ minHeight: 70 }}>
-                {cards.map((card) => (
-                  <TappedCardWrapper key={card.instanceId} card={card} cardW={46} cardH={66}>
-                    <div onMouseEnter={() => onHover(card)} onMouseLeave={onHoverEnd} className="w-full h-full cursor-default">
-                      {card.imageUri ? (
-                        <img src={card.imageUri} className="w-full h-full object-cover rounded"
-                          style={{ opacity: card.tapped ? 0.72 : 1,
-                            border: card.tapped ? '1px solid rgba(250,204,21,0.4)' : '1px solid rgba(255,255,255,0.1)',
-                            boxShadow: card.tapped ? '0 0 6px rgba(250,204,21,0.2)' : 'none' }} />
-                      ) : (
-                        <div className="w-full h-full rounded flex items-center justify-center p-0.5"
-                          style={{ background: '#1f2937', border: '1px solid #374151' }}>
-                          <span style={{ fontSize: 7, color: '#6b7280', textAlign: 'center' }}>{card.name.slice(0, 10)}</span>
-                        </div>
-                      )}
-                    </div>
-                  </TappedCardWrapper>
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Zone counts */}
-      <div className="flex items-center gap-4 px-3 py-1.5 text-xs font-semibold shrink-0"
-        style={{ color: '#4b5563', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-        <span>📚 {player.libraryCount}</span>
-        <span>🪦 {player.graveyard.length}</span>
-        <span>✦ {player.exile.length}</span>
-        {player.poisonCounters > 0 && <span style={{ color: '#16a34a' }}>☠ {player.poisonCounters}</span>}
-      </div>
-    </div>
-  );
-}
-
-// ── Drop zone (battlefield) ───────────────────────────────────────────────────
-
-function DropZone({ label, accept, onDrop, isOver, onDragOver, onDragLeave, children, style, className = '' }: {
-  label: string; accept: DragData['source'][]; onDrop: (d: DragData) => void;
-  isOver: boolean; onDragOver: () => void; onDragLeave: () => void;
-  children: React.ReactNode; style?: React.CSSProperties; className?: string;
-}) {
-  return (
-    <div className={`relative rounded-xl transition-all duration-150 ${className}`}
-      style={{
-        border: isOver ? '2px solid rgba(134,239,172,0.7)' : '2px dashed rgba(255,255,255,0.08)',
-        background: isOver ? 'rgba(134,239,172,0.06)' : 'rgba(0,0,0,0.15)',
-        boxShadow: isOver ? '0 0 20px rgba(134,239,172,0.15), inset 0 0 20px rgba(134,239,172,0.05)' : 'none',
-        ...style,
-      }}
-      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; onDragOver(); }}
-      onDragLeave={onDragLeave}
-      onDrop={(e) => {
-        e.preventDefault();
-        try {
-          const data: DragData = JSON.parse(e.dataTransfer.getData('application/json'));
-          if (accept.includes(data.source)) onDrop(data);
-        } catch { /* */ }
-      }}>
-      {/* Zone label */}
-      <div className="absolute top-0 left-0 right-0 flex justify-center pointer-events-none z-10" style={{ top: 6 }}>
-        <span className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full"
-          style={{ color: isOver ? 'rgba(134,239,172,0.9)' : 'rgba(255,255,255,0.18)', background: 'rgba(0,0,0,0.4)' }}>
-          {label}
-        </span>
-      </div>
-      {isOver && (
-        <div className="absolute inset-0 rounded-xl flex items-center justify-center z-10 pointer-events-none">
-          <span className="text-sm font-bold" style={{ color: 'rgba(134,239,172,0.8)' }}>Drop here</span>
-        </div>
-      )}
-      {children}
-    </div>
-  );
-}
-
-// ── Pile zone (graveyard / exile) ─────────────────────────────────────────────
-
-function PileZone({ cards, label, isOver, onDragOver, onDragLeave, onDrop, onHover, onHoverEnd, accentColor, onClick }: {
-  cards: GameCard[]; label: string; isOver: boolean;
-  onDragOver: () => void; onDragLeave: () => void; onDrop: (d: DragData) => void;
-  onHover: (c: GameCard) => void; onHoverEnd: () => void;
-  accentColor: string; onClick?: () => void;
-}) {
-  const topCard = cards[cards.length - 1];
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.22)' }}>{label}</span>
-      <div className="relative rounded-lg overflow-hidden transition-all duration-150"
-        onClick={onClick}
-        style={{
-          cursor: onClick ? 'pointer' : 'default', width: 52, height: 74,
-          border: isOver ? `2px solid ${accentColor}` : '2px dashed rgba(255,255,255,0.12)',
-          background: isOver ? `${accentColor}18` : 'rgba(0,0,0,0.3)',
-          boxShadow: isOver ? `0 0 12px ${accentColor}44` : 'none', flexShrink: 0,
-        }}
-        onDragOver={(e) => { e.preventDefault(); onDragOver(); }}
-        onDragLeave={onDragLeave}
-        onDrop={(e) => {
-          e.preventDefault();
-          try { const d: DragData = JSON.parse(e.dataTransfer.getData('application/json')); onDrop(d); } catch { /* */ }
-        }}
-        onMouseEnter={() => topCard && onHover(topCard)} onMouseLeave={onHoverEnd}>
-        {topCard?.imageUri ? (
-          <img src={topCard.imageUri} className="w-full h-full object-cover opacity-90" />
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center">
-            <span className="text-xl" style={{ opacity: 0.3 }}>{label === 'Graveyard' ? '🪦' : '✦'}</span>
-          </div>
-        )}
-        <div className="absolute inset-x-0 bottom-0 py-0.5 text-center" style={{ background: 'rgba(0,0,0,0.75)' }}>
-          <span className="text-xs font-bold" style={{ color: accentColor }}>{cards.length}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── My battlefield card ───────────────────────────────────────────────────────
 
-function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommander, onDragStart, onHover, onHoverEnd }: {
+function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommander, onDragStart, onHover, onHoverEnd, cardW = 80, cardH = 112 }: {
   card: GameCard; onTap: () => void; onGraveyard: () => void; onExile: () => void;
   onReturnCommander: () => void; onDragStart: (e: React.DragEvent) => void;
   onHover: (c: GameCard) => void; onHoverEnd: () => void;
+  cardW?: number; cardH?: number;
 }) {
   const [menu, setMenu] = useState(false);
-  const CARD_W = 58, CARD_H = 84;
   return (
-    <TappedCardWrapper card={card} cardW={CARD_W} cardH={CARD_H} className="group">
+    <TappedCardWrapper card={card} cardW={cardW} cardH={cardH} className="group">
       <div draggable onDragStart={(e) => { onDragStart(e); setMenu(false); }}
         onClick={onTap} onMouseEnter={() => onHover(card)} onMouseLeave={() => onHoverEnd()}
         className="w-full h-full" style={{ cursor: card.tapped ? 'pointer' : 'grab' }}>
@@ -486,55 +298,415 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
   );
 }
 
-// ── Battlefield rows (type-organised) ────────────────────────────────────────
+// ── Canvas layout helpers ─────────────────────────────────────────────────────
 
-function BattlefieldRows({ cards, onTap, onGraveyard, onExile, onReturnCommander, onDragStart, onHover, onHoverEnd }: {
-  cards: GameCard[];
-  onTap: (id: string) => void;
-  onGraveyard: (id: string) => void;
-  onExile: (id: string) => void;
-  onReturnCommander: (id: string) => void;
-  onDragStart: (e: React.DragEvent, id: string) => void;
+const C_W = 80, C_H = 112;
+const C_LW = 64, C_LH = 90;
+const C_HGAP = 10, C_RGAP = 14;
+const C_LBLW = 58;
+
+// Zone colors: [me, op1, op2, op3]
+const ZONE_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7'];
+
+const CANVAS_W = 3200;
+const CANVAS_H = 2000;
+const OPP_INFO_H = 54;
+const MY_LABEL_H = 26;
+
+interface CRow {
+  label: string; isLand: boolean;
+  y: number; cW: number; cH: number;
+  slots: { id: string; x: number }[];
+}
+
+function buildCRows(cards: GameCard[]): CRow[] {
+  const out: CRow[] = [];
+  let ry = 0;
+  for (const { label, cards: rc, isLand } of groupByType(cards)) {
+    const cW = isLand ? C_LW : C_W;
+    const cH = isLand ? C_LH : C_H;
+    out.push({
+      label, isLand, y: ry, cW, cH,
+      slots: rc.map((c, i) => ({ id: c.instanceId, x: C_LBLW + i * (cW + C_HGAP) })),
+    });
+    ry += cH + C_RGAP;
+  }
+  return out;
+}
+
+interface ZoneRect { x: number; y: number; w: number; h: number }
+
+function tableLayout(opCount: number): { my: ZoneRect; ops: ZoneRect[] } {
+  const PW = CANVAS_W - 40;
+  const GAP = 60;
+
+  if (opCount === 0) {
+    return { my: { x: 20, y: 20, w: PW, h: CANVAS_H - 40 }, ops: [] };
+  }
+  if (opCount === 1) {
+    const h = Math.floor((CANVAS_H - 40 - GAP) / 2);
+    return {
+      my:  { x: 20, y: 20 + h + GAP, w: PW, h },
+      ops: [{ x: 20, y: 20, w: PW, h }],
+    };
+  }
+  if (opCount === 2) {
+    const h = Math.floor((CANVAS_H - 40 - GAP) / 2);
+    const hw = Math.floor((PW - 20) / 2);
+    return {
+      my:  { x: 20, y: 20 + h + GAP, w: PW, h },
+      ops: [
+        { x: 20,          y: 20, w: hw, h },
+        { x: 20 + hw + 20, y: 20, w: hw, h },
+      ],
+    };
+  }
+  // 3 opponents: top (centered) + left + right
+  const topH = 580, topW = 1800;
+  const sideW = Math.floor((PW - topW - 40) / 2);
+  const sideH = 580;
+  const myY = 20 + topH + GAP + sideH + GAP;
+  return {
+    my:  { x: 20, y: myY, w: PW, h: CANVAS_H - myY - 20 },
+    ops: [
+      { x: 20 + Math.floor((PW - topW) / 2), y: 20, w: topW, h: topH },
+      { x: 20,            y: 20 + topH + GAP, w: sideW, h: sideH },
+      { x: 20 + PW - sideW, y: 20 + topH + GAP, w: sideW, h: sideH },
+    ],
+  };
+}
+
+// ── Mini pile (opponent graveyard / exile) ────────────────────────────────────
+
+function MiniPile({ cards, label, color, onHover, onHoverEnd }: {
+  cards: GameCard[]; label: string; color: string;
+  onHover: (c: GameCard) => void; onHoverEnd: () => void;
+}) {
+  const top = cards[cards.length - 1];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+      <span style={{ fontSize: 7, color: 'rgba(255,255,255,0.3)', fontWeight: 700, letterSpacing: 1 }}>{label}</span>
+      <div style={{ position: 'relative', width: 38, height: 54, borderRadius: 5, overflow: 'hidden',
+        border: `1px dashed ${color}55`, background: 'rgba(0,0,0,0.35)' }}
+        onMouseEnter={() => top && onHover(top)} onMouseLeave={onHoverEnd}>
+        {top?.imageUri && <img src={top.imageUri} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.75 }} />}
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0,
+          textAlign: 'center', background: 'rgba(0,0,0,0.7)', padding: '1px 0' }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color }}>{cards.length}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Opponent zone header (rendered inside canvas) ─────────────────────────────
+
+function ZoneHeader({ player, color }: { player: PersonalPlayerState; color: string }) {
+  const life = player.life;
+  const lifeColor = life <= 0 ? '#dc2626' : life <= 10 ? '#f97316' : '#f9fafb';
+  const commander = player.commandZone[0];
+  return (
+    <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: OPP_INFO_H,
+      background: 'rgba(0,0,0,0.55)', borderRadius: '12px 12px 0 0',
+      borderBottom: `1px solid ${color}28`,
+      display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px',
+      zIndex: 2 }}>
+      {player.isActive && (
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#facc15',
+          boxShadow: '0 0 6px #facc15', flexShrink: 0, display: 'inline-block' }} />
+      )}
+      <span style={{ fontWeight: 700, fontSize: 13, color: '#fff', flexShrink: 0 }}>{player.playerName}</span>
+      {commander && (
+        <span style={{ fontSize: 11, color: '#f59e0b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+          ⚜ {commander.name.split(',')[0]}
+        </span>
+      )}
+      {!commander && <span style={{ flex: 1 }} />}
+      <div style={{ display: 'flex', gap: 10, fontSize: 11, color: '#6b7280', flexShrink: 0 }}>
+        <span>✋{player.handCount}</span>
+        <span>📚{player.libraryCount}</span>
+      </div>
+      <span style={{ fontSize: 26, fontWeight: 900, fontFamily: 'monospace', color: lifeColor, flexShrink: 0,
+        textShadow: life <= 10 ? `0 0 10px ${lifeColor}88` : 'none' }}>
+        {life}
+      </span>
+    </div>
+  );
+}
+
+// ── Shared table canvas ───────────────────────────────────────────────────────
+
+interface TableCanvasProps {
+  me: PersonalPlayerState;
+  opponents: PersonalPlayerState[];
+  onTapCard: (id: string) => void;
+  onGraveyardCard: (id: string) => void;
+  onExileCard: (id: string) => void;
+  onReturnCmdCard: (id: string) => void;
+  onDragStartCard: (e: React.DragEvent, id: string) => void;
+  onPlayCard: (id: string) => void;
   onHover: (c: GameCard) => void;
   onHoverEnd: () => void;
-}) {
-  const rows = groupByType(cards);
-  if (cards.length === 0) {
-    return (
-      <div className="w-full h-full flex items-center justify-center pointer-events-none">
-        <p className="text-sm italic" style={{ color: 'rgba(255,255,255,0.07)' }}>Drag cards from hand to play here</p>
-      </div>
-    );
+}
+
+function TableCanvas({
+  me, opponents,
+  onTapCard, onGraveyardCard, onExileCard, onReturnCmdCard, onDragStartCard,
+  onPlayCard, onHover, onHoverEnd,
+}: TableCanvasProps) {
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(0.4);
+  const [overBf, setOverBf] = useState(false);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const cur = useRef({ pan: { x: 0, y: 0 }, zoom: 0.4 });
+  cur.current = { pan, zoom };
+
+  const layout = tableLayout(opponents.length);
+  const myColor = ZONE_COLORS[0];
+
+  function fitTable() {
+    const el = viewportRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const nz = Math.max(0.25, Math.min(1.5,
+      Math.min((rect.width - 32) / CANVAS_W, (rect.height - 32) / CANVAS_H)
+    ));
+    setPan({ x: (rect.width - CANVAS_W * nz) / 2, y: (rect.height - CANVAS_H * nz) / 2 });
+    setZoom(nz);
   }
+
+  useLayoutEffect(() => { fitTable(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Attach non-passive wheel listener so we can preventDefault
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const ox = e.clientX - rect.left, oy = e.clientY - rect.top;
+      const { zoom: z, pan: p } = cur.current;
+      const factor = e.ctrlKey ? Math.exp(-e.deltaY * 0.008) : (e.deltaY < 0 ? 1.1 : 1 / 1.1);
+      const nz = Math.max(0.25, Math.min(1.5, z * factor));
+      const s = nz / z;
+      setZoom(nz);
+      setPan({ x: ox - s * (ox - p.x), y: oy - s * (oy - p.y) });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  function onBgDown(e: React.MouseEvent) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const p0 = { ...cur.current.pan };
+    const m0 = { x: e.clientX, y: e.clientY };
+    if (viewportRef.current) viewportRef.current.style.cursor = 'grabbing';
+    const mv = (ev: MouseEvent) => setPan({ x: p0.x + ev.clientX - m0.x, y: p0.y + ev.clientY - m0.y });
+    const up = () => {
+      if (viewportRef.current) viewportRef.current.style.cursor = 'grab';
+      window.removeEventListener('mousemove', mv);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('mouseup', up);
+  }
+
+  const myRows = buildCRows(me.battlefield);
+  const myCardMap = new Map<string, GameCard>(me.battlefield.map(c => [c.instanceId as string, c as GameCard]));
+
   return (
-    <div className="w-full h-full overflow-y-auto flex flex-col gap-1 px-2 pb-2 pt-7">
-      {rows.map(({ label, cards: rowCards }) => (
-        <div key={label} className="flex items-start gap-1" style={{ minHeight: 96 }}>
-          {/* Left row label */}
-          <div className="shrink-0 w-[68px] text-right pr-2 pt-2">
-            <span className="text-[8px] font-bold uppercase tracking-widest leading-tight"
-              style={{ color: 'rgba(255,255,255,0.2)' }}>
-              {label.replace('/', '/\n')}
-            </span>
+    <div ref={viewportRef} className="relative w-full h-full overflow-hidden"
+      style={{ cursor: 'grab' }}
+      onMouseDown={onBgDown}>
+
+      {/* ── Transformed table canvas ── */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0,
+        transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+        transformOrigin: '0 0',
+        width: CANVAS_W, height: CANVAS_H,
+      }}>
+
+        {/* Opponent zones */}
+        {opponents.map((player, i) => {
+          const zone = layout.ops[i];
+          if (!zone) return null;
+          const color = ZONE_COLORS[(i + 1) % ZONE_COLORS.length];
+          const rows = buildCRows(player.battlefield);
+          const cardMap = new Map<string, GameCard>(player.battlefield.map(c => [c.instanceId as string, c as GameCard]));
+
+          return (
+            <div key={player.socketId} style={{
+              position: 'absolute', left: zone.x, top: zone.y, width: zone.w, height: zone.h,
+              borderRadius: 14,
+              border: player.isActive ? `2px solid ${color}90` : `1px solid ${color}35`,
+              background: player.isActive ? `${color}0d` : `${color}07`,
+              boxShadow: player.isActive ? `0 0 40px ${color}18` : 'none',
+            }}>
+              <ZoneHeader player={player} color={color} />
+
+              {/* Card rows */}
+              {rows.map(row => (
+                <React.Fragment key={row.label}>
+                  <div style={{ position: 'absolute', left: 0, top: OPP_INFO_H + row.y + row.cH / 2 - 7,
+                    width: C_LBLW - 4, textAlign: 'right', pointerEvents: 'none' }}>
+                    <span style={{ fontSize: 7, fontWeight: 700, letterSpacing: 1,
+                      color: row.isLand ? 'rgba(134,239,172,0.22)' : 'rgba(255,255,255,0.18)' }}>
+                      {row.label.split('/')[0].toUpperCase()}
+                    </span>
+                  </div>
+                  {row.slots.map(slot => {
+                    const card = cardMap.get(slot.id);
+                    if (!card) return null;
+                    return (
+                      <div key={slot.id} style={{ position: 'absolute', left: slot.x, top: OPP_INFO_H + row.y }}
+                        onMouseDown={e => e.stopPropagation()}>
+                        <TappedCardWrapper card={card} cardW={row.cW} cardH={row.cH}>
+                          <div onMouseEnter={() => onHover(card)} onMouseLeave={onHoverEnd}
+                            className="w-full h-full cursor-default">
+                            {card.imageUri ? (
+                              <img src={card.imageUri} className="w-full h-full object-cover rounded"
+                                style={{ opacity: card.tapped ? 0.72 : 1,
+                                  border: card.tapped ? '1px solid rgba(250,204,21,0.4)' : '1px solid rgba(255,255,255,0.08)' }} />
+                            ) : (
+                              <div className="w-full h-full rounded flex items-center justify-center p-0.5"
+                                style={{ background: '#1f2937', border: '1px solid #374151' }}>
+                                <span style={{ fontSize: 6, color: '#6b7280' }}>{card.name.slice(0, 8)}</span>
+                              </div>
+                            )}
+                          </div>
+                        </TappedCardWrapper>
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
+
+              {/* Graveyard + exile piles */}
+              <div style={{ position: 'absolute', bottom: 10, right: 10, display: 'flex', gap: 8, zIndex: 3 }}>
+                {player.graveyard.length > 0 && (
+                  <MiniPile cards={player.graveyard} label="GY" color="#9ca3af"
+                    onHover={onHover} onHoverEnd={onHoverEnd} />
+                )}
+                {player.exile.length > 0 && (
+                  <MiniPile cards={player.exile} label="EX" color="#a78bfa"
+                    onHover={onHover} onHoverEnd={onHoverEnd} />
+                )}
+              </div>
+
+              {/* Hand card backs */}
+              {player.handCount > 0 && (
+                <div style={{ position: 'absolute', bottom: 10, left: 12, display: 'flex', alignItems: 'flex-end', gap: 2, zIndex: 3 }}>
+                  {Array.from({ length: Math.min(player.handCount, 10) }).map((_, i2) => (
+                    <CardBack key={i2} style={{ width: 18, height: 26,
+                      transform: `rotate(${(i2 - Math.min(player.handCount, 10) / 2) * 2}deg)` }} />
+                  ))}
+                  <span style={{ fontSize: 9, color: '#4b5563', marginLeft: 4, fontWeight: 600 }}>
+                    {player.handCount}
+                  </span>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* My zone */}
+        <div style={{
+          position: 'absolute', left: layout.my.x, top: layout.my.y,
+          width: layout.my.w, height: layout.my.h,
+          borderRadius: 14,
+          border: me.isActive ? `2px solid ${myColor}90` : `1px solid ${myColor}35`,
+          background: me.isActive ? `${myColor}0d` : `${myColor}07`,
+          boxShadow: me.isActive ? `0 0 40px ${myColor}18` : 'none',
+        }}>
+
+          {/* My name label */}
+          <div style={{ position: 'absolute', top: 7, left: 14, zIndex: 2, pointerEvents: 'none',
+            display: 'flex', alignItems: 'center', gap: 6 }}>
+            {me.isActive && (
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#facc15',
+                boxShadow: '0 0 6px #facc15', display: 'inline-block' }} />
+            )}
+            <span style={{ fontSize: 11, fontWeight: 700, color: `${myColor}cc` }}>{me.playerName}</span>
           </div>
-          {/* Cards — wrap within row so tapped cards never overlap */}
-          <div className="flex flex-wrap gap-2.5 flex-1 min-w-0 p-1" style={{ alignContent: 'flex-start' }}>
-            {rowCards.map((card) => (
-              <MyBattlefieldCard
-                key={card.instanceId}
-                card={card}
-                onTap={() => onTap(card.instanceId)}
-                onGraveyard={() => onGraveyard(card.instanceId)}
-                onExile={() => onExile(card.instanceId)}
-                onReturnCommander={() => onReturnCommander(card.instanceId)}
-                onDragStart={(e) => onDragStart(e, card.instanceId)}
-                onHover={onHover}
-                onHoverEnd={onHoverEnd}
-              />
-            ))}
-          </div>
+
+          {/* Drop highlight overlay */}
+          {overBf && (
+            <div style={{ position: 'absolute', inset: 0, borderRadius: 14, zIndex: 1, pointerEvents: 'none',
+              border: '2px solid rgba(134,239,172,0.7)',
+              background: 'rgba(134,239,172,0.06)',
+              boxShadow: '0 0 30px rgba(134,239,172,0.12)' }} />
+          )}
+
+          {/* Drop capture */}
+          <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOverBf(true); }}
+            onDragLeave={() => setOverBf(false)}
+            onDrop={(e) => {
+              e.preventDefault(); setOverBf(false);
+              try {
+                const d: DragData = JSON.parse(e.dataTransfer.getData('application/json'));
+                if (d.source === 'hand') onPlayCard(d.instanceId);
+              } catch { /* */ }
+            }}
+            onMouseDown={e => e.stopPropagation()} />
+
+          {/* Empty hint */}
+          {me.battlefield.length === 0 && (
+            <p style={{ position: 'absolute', left: C_LBLW, top: MY_LABEL_H + 12,
+              color: 'rgba(255,255,255,0.06)', fontSize: 13, pointerEvents: 'none', fontStyle: 'italic' }}>
+              Drag cards from hand to play here
+            </p>
+          )}
+
+          {/* Card rows */}
+          {myRows.map(row => (
+            <React.Fragment key={row.label}>
+              <div style={{ position: 'absolute', left: 0, top: MY_LABEL_H + row.y + row.cH / 2 - 7,
+                width: C_LBLW - 4, textAlign: 'right', pointerEvents: 'none' }}>
+                <span style={{ fontSize: 7, fontWeight: 700, letterSpacing: 1,
+                  color: row.isLand ? 'rgba(134,239,172,0.25)' : 'rgba(255,255,255,0.2)' }}>
+                  {row.label.split('/')[0].toUpperCase()}
+                </span>
+              </div>
+              {row.slots.map(slot => {
+                const card = myCardMap.get(slot.id);
+                if (!card) return null;
+                return (
+                  <div key={slot.id} style={{ position: 'absolute', left: slot.x, top: MY_LABEL_H + row.y, zIndex: 2 }}
+                    onMouseDown={e => e.stopPropagation()}>
+                    <MyBattlefieldCard
+                      card={card} cardW={row.cW} cardH={row.cH}
+                      onTap={() => onTapCard(card.instanceId)}
+                      onGraveyard={() => onGraveyardCard(card.instanceId)}
+                      onExile={() => onExileCard(card.instanceId)}
+                      onReturnCommander={() => onReturnCmdCard(card.instanceId)}
+                      onDragStart={e => onDragStartCard(e, card.instanceId)}
+                      onHover={onHover} onHoverEnd={onHoverEnd}
+                    />
+                  </div>
+                );
+              })}
+            </React.Fragment>
+          ))}
         </div>
-      ))}
+      </div>
+
+      {/* ── HUD (fixed over canvas) ── */}
+      <div className="absolute bottom-3 right-3 z-10 flex items-center gap-2 pointer-events-none">
+        <span className="text-[9px] font-mono" style={{ color: 'rgba(255,255,255,0.22)' }}>
+          {Math.round(zoom * 100)}%
+        </span>
+        <button
+          className="pointer-events-auto text-[9px] font-bold px-2 py-1 rounded-lg transition hover:bg-white/10"
+          style={{ color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.12)',
+            background: 'rgba(0,0,0,0.5)' }}
+          onClick={e => { e.stopPropagation(); fitTable(); }}
+          onMouseDown={e => e.stopPropagation()}>
+          ⊡ Fit Table
+        </button>
+      </div>
     </div>
   );
 }
@@ -581,6 +753,134 @@ function CmdDamageMatrix({ players, mySocketId, onUpdate }: {
   );
 }
 
+// ── Token creation ────────────────────────────────────────────────────────────
+
+function makeTokenImageUri(name: string, pt: string, color: string): string {
+  const bg: Record<string, string> = {
+    white: '#cfc08a', blue: '#1c3d6b', black: '#1a1228', red: '#6b1c1c', green: '#1c4a2a', colorless: '#3a3a4a',
+  };
+  const bd: Record<string, string> = {
+    white: '#a89850', blue: '#4a7ec4', black: '#7a4ab4', red: '#c44a4a', green: '#4a9a5a', colorless: '#7a7a8a',
+  };
+  const bgC = bg[color] ?? bg.colorless;
+  const bdC = bd[color] ?? bd.colorless;
+  const n = name.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="280" viewBox="0 0 200 280"><rect width="200" height="280" rx="10" fill="${bgC}" stroke="${bdC}" stroke-width="3"/><rect x="8" y="8" width="184" height="264" rx="7" fill="none" stroke="${bdC}" stroke-width="1" opacity="0.5"/><text x="100" y="108" font-family="Georgia,serif" font-size="13" fill="white" text-anchor="middle" font-weight="bold">${n}</text><rect x="55" y="168" width="90" height="38" rx="6" fill="rgba(0,0,0,0.45)" stroke="${bdC}" stroke-width="1"/><text x="100" y="194" font-family="Georgia,serif" font-size="22" fill="white" text-anchor="middle" font-weight="bold">${pt}</text><text x="100" y="240" font-family="Georgia,serif" font-size="9" fill="rgba(255,255,255,0.35)" text-anchor="middle">TOKEN</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+const TOKEN_COLORS = ['white', 'blue', 'black', 'red', 'green', 'colorless'] as const;
+type TokenColor = typeof TOKEN_COLORS[number];
+
+const TOKEN_COLOR_SWATCHES: Record<TokenColor, string> = {
+  white: '#cfc08a', blue: '#4a7eb5', black: '#7a4ab4', red: '#c44a4a', green: '#4a9a5a', colorless: '#7a7a8a',
+};
+
+const TOKEN_PRESETS = [
+  { name: 'Saproling', power: '1', toughness: '1', color: 'green' as TokenColor, typeLine: 'Token Creature — Saproling' },
+  { name: 'Zombie',    power: '2', toughness: '2', color: 'black' as TokenColor, typeLine: 'Token Creature — Zombie'    },
+  { name: 'Human',     power: '1', toughness: '1', color: 'white' as TokenColor, typeLine: 'Token Creature — Human'     },
+  { name: 'Beast',     power: '3', toughness: '3', color: 'green' as TokenColor, typeLine: 'Token Creature — Beast'     },
+  { name: 'Goblin',    power: '1', toughness: '1', color: 'red'   as TokenColor, typeLine: 'Token Creature — Goblin'    },
+];
+
+function TokenCreateModal({ onClose, onCreate }: {
+  onClose: () => void;
+  onCreate: (name: string, power: string, toughness: string, color: TokenColor, typeLine: string) => void;
+}) {
+  const [name, setName]           = useState('');
+  const [power, setPower]         = useState('1');
+  const [toughness, setToughness] = useState('1');
+  const [color, setColor]         = useState<TokenColor>('green');
+  const [typeLine, setTypeLine]   = useState('Token Creature');
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(6px)' }}
+      onClick={onClose}>
+      <div className="rounded-2xl p-5 flex flex-col gap-4"
+        style={{ width: 380, background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)',
+          boxShadow: '0 40px 80px rgba(0,0,0,0.9)' }}
+        onClick={(e) => e.stopPropagation()}>
+
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold text-white">Create Token</h2>
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg transition hover:bg-white/10"
+            style={{ color: '#6b7280' }}>×</button>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>Quick Presets</p>
+          <div className="flex flex-wrap gap-1.5">
+            {TOKEN_PRESETS.map((p) => (
+              <button key={p.name}
+                onClick={() => { setName(p.name); setPower(p.power); setToughness(p.toughness); setColor(p.color); setTypeLine(p.typeLine); }}
+                className="text-xs px-2.5 py-1 rounded-lg transition hover:brightness-110"
+                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#d1d5db' }}>
+                {p.power}/{p.toughness} {p.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Saproling" autoFocus
+            className="px-3 py-2 rounded-lg text-sm focus:outline-none"
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#e5e7eb' }} />
+        </div>
+
+        <div className="flex items-end gap-2">
+          <div className="flex flex-col gap-1 flex-1">
+            <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Power</label>
+            <input value={power} onChange={(e) => setPower(e.target.value)} placeholder="1"
+              className="px-3 py-2 rounded-lg text-sm focus:outline-none text-center"
+              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#e5e7eb' }} />
+          </div>
+          <span className="pb-2 text-lg font-bold" style={{ color: '#4b5563' }}>/</span>
+          <div className="flex flex-col gap-1 flex-1">
+            <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Toughness</label>
+            <input value={toughness} onChange={(e) => setToughness(e.target.value)} placeholder="1"
+              className="px-3 py-2 rounded-lg text-sm focus:outline-none text-center"
+              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#e5e7eb' }} />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Color</label>
+          <div className="flex gap-2 items-center">
+            {TOKEN_COLORS.map((c) => (
+              <button key={c} onClick={() => setColor(c)} title={c}
+                className="rounded-full transition-transform hover:scale-110"
+                style={{ width: 28, height: 28, background: TOKEN_COLOR_SWATCHES[c],
+                  border: color === c ? '2px solid white' : '2px solid transparent',
+                  boxShadow: color === c ? `0 0 8px ${TOKEN_COLOR_SWATCHES[c]}` : 'none' }} />
+            ))}
+            <span className="text-xs ml-1 capitalize" style={{ color: '#6b7280' }}>{color}</span>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Type Line</label>
+          <input value={typeLine} onChange={(e) => setTypeLine(e.target.value)} placeholder="Token Creature — Saproling"
+            className="px-3 py-2 rounded-lg text-sm focus:outline-none"
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#e5e7eb' }} />
+        </div>
+
+        <button
+          onClick={() => { if (name.trim()) { onCreate(name.trim(), power, toughness, color, typeLine); onClose(); } }}
+          disabled={!name.trim()}
+          className="w-full py-3 rounded-xl font-bold text-sm transition hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{ background: 'linear-gradient(135deg, #166534, #14532d)',
+            border: '1px solid rgba(74,222,128,0.3)', color: '#86efac',
+            boxShadow: '0 0 16px rgba(74,222,128,0.15)' }}>
+          ✦ Create Token
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function GameBoardPage() {
@@ -590,20 +890,15 @@ export default function GameBoardPage() {
   const [showLog, setShowLog] = useState(false);
   const [hoverCard, setHoverCard] = useState<GameCard | null>(null);
   const [mouse, setMouse] = useState({ x: 0, y: 0 });
-  const [overBf, setOverBf] = useState(false);
-  const [overGy, setOverGy] = useState(false);
-  const [overEx, setOverEx] = useState(false);
+  const [showTokenModal, setShowTokenModal] = useState(false);
 
-  // Zone modals
   const [zoneModal, setZoneModal] = useState<'graveyard' | 'exile' | 'library' | null>(null);
   const [libraryCards, setLibraryCards] = useState<GameCard[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
 
-  // Timing error toast
   const [timingToast, setTimingToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Commander replacement popup (EDH rule)
   const [commanderPopup, setCommanderPopup] = useState<{
     cardName: string; instanceId: string; destination: 'graveyard' | 'exile';
   } | null>(null);
@@ -627,7 +922,6 @@ export default function GameBoardPage() {
     };
   }, []);
 
-  // Track commander scryfallId so we can identify it when it's on the battlefield
   useEffect(() => {
     const me = gameState?.players.find((p) => p.socketId === gameState.mySocketId);
     if (me?.commandZone.length && !commanderScryfallId.current) {
@@ -651,11 +945,11 @@ export default function GameBoardPage() {
     );
   }
 
-  const mySocketId  = gameState.mySocketId;
-  const me          = gameState.players.find((p) => p.socketId === mySocketId);
-  const opponents   = gameState.players.filter((p) => p.socketId !== mySocketId);
-  const active      = gameState.players[gameState.activePlayerIndex];
-  const isMyTurn    = active?.socketId === mySocketId;
+  const mySocketId = gameState.mySocketId;
+  const me         = gameState.players.find((p) => p.socketId === mySocketId);
+  const opponents  = gameState.players.filter((p) => p.socketId !== mySocketId);
+  const active     = gameState.players[gameState.activePlayerIndex];
+  const isMyTurn   = active?.socketId === mySocketId;
 
   if (!me) return (
     <div className="h-screen flex items-center justify-center" style={FELT}>
@@ -666,66 +960,60 @@ export default function GameBoardPage() {
     </div>
   );
 
-  // ── Emit helpers ────────────────────────────────────────────────────────────
+  // ── Emit helpers ─────────────────────────────────────────────────────────────
 
   const emit = {
-    drawCard:    ()           => socket.emit('game:draw_card'),
-    playCard:    (id: string) => socket.emit('game:play_card',            { instanceId: id }),
-    tapCard:     (id: string) => socket.emit('game:tap_card',             { instanceId: id }),
-    endPhase:    ()           => socket.emit('game:end_phase'),
-    endTurn:     ()           => socket.emit('game:end_turn'),
-    updateLife:  (d: number)  => socket.emit('game:update_life',          { delta: d }),
-    updateCmdDmg:(f: string, d: number) => socket.emit('game:update_commander_damage', { fromSocketId: f, delta: d }),
-    toGraveyard:   (id: string) => socket.emit('game:move_to_graveyard',    { instanceId: id }),
-    toExile:       (id: string) => socket.emit('game:move_to_exile',        { instanceId: id }),
-    toHand:        (id: string) => socket.emit('game:move_to_hand',         { instanceId: id }),
-    returnToBf:    (id: string) => socket.emit('game:return_to_battlefield', { instanceId: id }),
-    returnCmd:     (id: string) => socket.emit('game:return_commander',     { instanceId: id }),
-    castCommander: ()           => socket.emit('game:cast_commander'),
-    tutor:         (id: string, to: 'hand' | 'battlefield') => socket.emit('game:tutor', { instanceId: id, to }),
+    drawCard:     ()           => socket.emit('game:draw_card'),
+    playCard:     (id: string) => socket.emit('game:play_card',             { instanceId: id }),
+    tapCard:      (id: string) => socket.emit('game:tap_card',              { instanceId: id }),
+    endPhase:     ()           => socket.emit('game:end_phase'),
+    endTurn:      ()           => socket.emit('game:end_turn'),
+    updateLife:   (d: number)  => socket.emit('game:update_life',           { delta: d }),
+    updateCmdDmg: (f: string, d: number) => socket.emit('game:update_commander_damage', { fromSocketId: f, delta: d }),
+    toGraveyard:  (id: string) => socket.emit('game:move_to_graveyard',     { instanceId: id }),
+    toExile:      (id: string) => socket.emit('game:move_to_exile',         { instanceId: id }),
+    toHand:       (id: string) => socket.emit('game:move_to_hand',          { instanceId: id }),
+    returnToBf:   (id: string) => socket.emit('game:return_to_battlefield', { instanceId: id }),
+    returnCmd:    (id: string) => socket.emit('game:return_commander',      { instanceId: id }),
+    castCommander: ()          => socket.emit('game:cast_commander'),
+    tutor:        (id: string, to: 'hand' | 'battlefield') => socket.emit('game:tutor', { instanceId: id, to }),
+    createToken:  (name: string, power: string, toughness: string, color: string, typeLine: string) => {
+      const imageUri = makeTokenImageUri(name, `${power}/${toughness}`, color);
+      socket.emit('game:create_token', { name, power, toughness, color, typeLine, imageUri });
+    },
   };
 
-  // ── Timing helper (client-side visual hints, server is authoritative) ──────────
+  // ── Timing helper ─────────────────────────────────────────────────────────────
 
   function cardTimingStatus(card: GameCard): { playable: boolean; reason: string } {
     const isInstant = card.typeLine?.includes('Instant') ?? false;
     if (isInstant) return { playable: true, reason: 'Instant — can be played any time' };
-
     if (!isMyTurn) return { playable: false, reason: "It's not your turn — only instants can be played" };
-
     if (gameState.phase !== 'main1' && gameState.phase !== 'main2') {
       const phaseLabel = PHASES.find((p) => p.key === gameState.phase)?.label ?? gameState.phase;
       return { playable: false, reason: `Main Phase only — currently ${phaseLabel}` };
     }
-
     if (card.typeLine?.includes('Land') && me.landsPlayedThisTurn >= 1) {
-      return { playable: false, reason: "Already played a land this turn" };
+      return { playable: false, reason: 'Already played a land this turn' };
     }
-
     return { playable: true, reason: '' };
   }
 
-  // ── Commander replacement interception (EDH rule) ───────────────────────────
+  // ── Commander replacement interception ────────────────────────────────────────
 
   function interceptGraveyard(instanceId: string) {
     const card = me.battlefield.find((c) => c.instanceId === instanceId);
     if (card && commanderScryfallId.current && card.scryfallId === commanderScryfallId.current) {
       setCommanderPopup({ cardName: card.name, instanceId, destination: 'graveyard' });
-    } else {
-      emit.toGraveyard(instanceId);
-    }
+    } else { emit.toGraveyard(instanceId); }
   }
 
   function interceptExile(instanceId: string) {
     const card = me.battlefield.find((c) => c.instanceId === instanceId);
     if (card && commanderScryfallId.current && card.scryfallId === commanderScryfallId.current) {
       setCommanderPopup({ cardName: card.name, instanceId, destination: 'exile' });
-    } else {
-      emit.toExile(instanceId);
-    }
+    } else { emit.toExile(instanceId); }
   }
-
-  // ── Drag helpers ────────────────────────────────────────────────────────────
 
   function dragStart(e: React.DragEvent, instanceId: string, source: DragData['source']) {
     const data: DragData = { instanceId, source };
@@ -733,12 +1021,11 @@ export default function GameBoardPage() {
     e.dataTransfer.effectAllowed = 'move';
   }
 
-  // ── Derived ─────────────────────────────────────────────────────────────────
+  // ── Derived ──────────────────────────────────────────────────────────────────
 
   const myCommander = me.commandZone[0];
   const lifeColor   = me.life <= 0 ? '#dc2626' : me.life <= 10 ? '#f97316' : '#4ade80';
   const tax         = me.commanderCastCount * 2;
-  const taxLabel    = tax === 0 ? 'No tax' : `+${tax} mana tax`;
   const taxColor    = tax === 0 ? '#4b5563' : tax >= 4 ? '#ef4444' : '#f97316';
 
   return (
@@ -754,7 +1041,6 @@ export default function GameBoardPage() {
           <span className="text-sm font-bold" style={{ color: isMyTurn ? '#facc15' : '#e5e7eb' }}>
             {isMyTurn ? '⚡ Your Turn' : `${active?.playerName}'s Turn`}
           </span>
-          {/* Instant-speed indicator — shown when player can't play sorcery-speed cards */}
           {(!isMyTurn || (gameState.phase !== 'main1' && gameState.phase !== 'main2')) && (
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md"
               style={{ background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.35)', color: '#a5b4fc' }}>
@@ -788,205 +1074,166 @@ export default function GameBoardPage() {
         </div>
       </header>
 
-      {/* ── Body: 60% opponents / 40% me ── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      {/* ── Shared table canvas (fills space between header and info bar) ── */}
+      <div className="flex-1 overflow-hidden min-h-0">
+        <TableCanvas
+          me={me}
+          opponents={opponents}
+          onTapCard={emit.tapCard}
+          onGraveyardCard={interceptGraveyard}
+          onExileCard={interceptExile}
+          onReturnCmdCard={emit.returnCmd}
+          onDragStartCard={(e, id) => dragStart(e, id, 'battlefield')}
+          onPlayCard={emit.playCard}
+          onHover={setHoverCard}
+          onHoverEnd={() => setHoverCard(null)}
+        />
+      </div>
 
-        {/* Opponents — 60% */}
-        <div className="flex gap-2 p-2 overflow-hidden" style={{ flex: '0 0 60%' }}>
-          {opponents.map((p) => (
-            <OpponentZone key={p.socketId} player={p}
-              onHover={setHoverCard} onHoverEnd={() => setHoverCard(null)} />
-          ))}
-          {opponents.length === 0 && (
-            <div className="flex-1 flex items-center justify-center text-sm italic" style={{ color: '#1f4a2e' }}>
-              Waiting for opponents…
-            </div>
-          )}
+      {/* ── My fixed info bar ── */}
+      <div className="shrink-0 flex items-center gap-4 px-4"
+        style={{ height: 80, background: 'rgba(0,0,0,0.72)',
+          borderTop: '1px solid rgba(255,255,255,0.07)', backdropFilter: 'blur(8px)' }}>
+
+        {/* Life */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button onClick={() => emit.updateLife(-1)}
+            className="w-8 h-8 rounded-xl font-black text-lg transition hover:scale-110"
+            style={{ background: 'rgba(220,38,38,0.2)', border: '1px solid rgba(220,38,38,0.3)', color: '#fca5a5' }}>−</button>
+          <div className="text-center" style={{ minWidth: '3.8rem' }}>
+            <span className="font-black font-mono tabular-nums"
+              style={{ fontSize: '3.8rem', lineHeight: 1, color: lifeColor,
+                textShadow: `0 0 16px ${lifeColor}55, 0 2px 4px rgba(0,0,0,0.8)` }}>
+              {me.life}
+            </span>
+          </div>
+          <button onClick={() => emit.updateLife(1)}
+            className="w-8 h-8 rounded-xl font-black text-lg transition hover:scale-110"
+            style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.3)', color: '#86efac' }}>+</button>
         </div>
 
-        {/* My zone — 40% */}
-        <div className="flex flex-col overflow-hidden" style={{
-          flex: '0 0 40%', borderTop: '2px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.42)',
-        }}>
-
-          {/* Info bar */}
-          <div className="shrink-0 flex items-center gap-4 px-4" style={{ height: 76, borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-
-            {/* Life */}
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button onClick={() => emit.updateLife(-1)}
-                className="w-8 h-8 rounded-xl font-black text-lg transition hover:scale-110"
-                style={{ background: 'rgba(220,38,38,0.2)', border: '1px solid rgba(220,38,38,0.3)', color: '#fca5a5' }}>−</button>
-              <div className="text-center" style={{ minWidth: '3.8rem' }}>
-                <span className="font-black font-mono tabular-nums"
-                  style={{ fontSize: '4rem', lineHeight: 1, color: lifeColor,
-                    textShadow: `0 0 16px ${lifeColor}55, 0 2px 4px rgba(0,0,0,0.8)` }}>
-                  {me.life}
-                </span>
-              </div>
-              <button onClick={() => emit.updateLife(1)}
-                className="w-8 h-8 rounded-xl font-black text-lg transition hover:scale-110"
-                style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.3)', color: '#86efac' }}>+</button>
+        {/* Commander */}
+        <div className="flex items-center gap-2.5 shrink-0"
+          style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 16 }}>
+          {myCommander && (
+            <div className="rounded-lg overflow-hidden shrink-0 cursor-pointer"
+              style={{ width: 36, height: 50, border: '1px solid rgba(250,204,21,0.4)',
+                boxShadow: '0 0 10px rgba(250,204,21,0.2)' }}
+              onMouseEnter={() => setHoverCard(myCommander)}
+              onMouseLeave={() => setHoverCard(null)}>
+              {myCommander.imageUri
+                ? <img src={myCommander.imageUri} className="w-full h-full object-cover" />
+                : <CardBack style={{ width: '100%', height: '100%' }} />}
             </div>
-
-            {/* Commander */}
-            <div className="flex items-center gap-2.5 shrink-0"
-              style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 16 }}>
-              {myCommander && (
-                <div className="rounded-lg overflow-hidden shrink-0 cursor-pointer"
-                  style={{ width: 36, height: 50, border: '1px solid rgba(250,204,21,0.4)',
-                    boxShadow: '0 0 10px rgba(250,204,21,0.2)' }}
-                  onMouseEnter={() => setHoverCard(myCommander)}
-                  onMouseLeave={() => setHoverCard(null)}>
-                  {myCommander.imageUri
-                    ? <img src={myCommander.imageUri} className="w-full h-full object-cover" />
-                    : <CardBack style={{ width: '100%', height: '100%' }} />}
-                </div>
-              )}
-              <div>
-                <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#f59e0b' }}>Commander</p>
-                {myCommander
-                  ? <p className="text-sm font-semibold max-w-[110px] truncate" style={{ color: '#f3f4f6' }}>{myCommander.name}</p>
-                  : <p className="text-xs" style={{ color: '#6b7280' }}>On battlefield</p>}
-                {/* Tax display with tooltip */}
-                <div className="flex items-center gap-1 mt-0.5" title={
-                  tax === 0
-                    ? 'Commander tax: no additional cost for first cast'
-                    : `Commander tax: pay an additional ${tax} generic mana for each previous cast from command zone`
-                }>
-                  <span className="text-[9px] font-bold" style={{ color: taxColor }}>
-                    {me.commanderCastCount === 0 ? 'No tax' : `Tax: +${tax}⧫`}
-                  </span>
-                  <span className="text-[8px]" style={{ color: '#374151' }}>(cast {me.commanderCastCount}×)</span>
-                </div>
-                {myCommander && (
-                  <button onClick={emit.castCommander}
-                    className="mt-0.5 text-[10px] font-bold px-2 py-0.5 rounded-md transition hover:brightness-110"
-                    style={{ background: 'linear-gradient(135deg, #92400e, #78350f)',
-                      border: '1px solid rgba(250,204,21,0.3)', color: '#fbbf24',
-                      boxShadow: '0 0 6px rgba(250,204,21,0.2)' }}>
-                    ⚡ Cast Commander
-                  </button>
-                )}
-              </div>
+          )}
+          <div>
+            <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#f59e0b' }}>Commander</p>
+            {myCommander
+              ? <p className="text-sm font-semibold max-w-[110px] truncate" style={{ color: '#f3f4f6' }}>{myCommander.name}</p>
+              : <p className="text-xs" style={{ color: '#6b7280' }}>On battlefield</p>}
+            <div className="flex items-center gap-1 mt-0.5"
+              title={tax === 0 ? 'No commander tax' : `Tax: +${tax} generic mana`}>
+              <span className="text-[9px] font-bold" style={{ color: taxColor }}>
+                {me.commanderCastCount === 0 ? 'No tax' : `Tax: +${tax}⧫`}
+              </span>
+              <span className="text-[8px]" style={{ color: '#374151' }}>(cast {me.commanderCastCount}×)</span>
             </div>
-
-            {/* Zone counts — clickable */}
-            <div className="flex items-center gap-1.5 text-sm font-semibold"
-              style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 16 }}>
-              <button onClick={openLibraryModal} title="Search library"
-                className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
-                style={{ color: '#4b5563' }}>📚 {me.libraryCount}</button>
-              <span style={{ color: '#374151' }}>✋ {me.handCount}</span>
-              <button onClick={() => setZoneModal('graveyard')} title="View graveyard"
-                className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
-                style={{ color: me.graveyard.length > 0 ? '#9ca3af' : '#4b5563' }}>
-                🪦 {me.graveyard.length}
+            {myCommander && (
+              <button onClick={emit.castCommander}
+                className="mt-0.5 text-[10px] font-bold px-2 py-0.5 rounded-md transition hover:brightness-110"
+                style={{ background: 'linear-gradient(135deg, #92400e, #78350f)',
+                  border: '1px solid rgba(250,204,21,0.3)', color: '#fbbf24',
+                  boxShadow: '0 0 6px rgba(250,204,21,0.2)' }}>
+                ⚡ Cast
               </button>
-              <button onClick={() => setZoneModal('exile')} title="View exile"
-                className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
-                style={{ color: me.exile.length > 0 ? '#a78bfa' : '#4b5563' }}>
-                ✦ {me.exile.length}
-              </button>
-            </div>
-
-            {/* Damage matrix (right) */}
-            <div className="ml-auto shrink-0">
-              <CmdDamageMatrix players={gameState.players} mySocketId={mySocketId} onUpdate={emit.updateCmdDmg} />
-            </div>
-
-            {/* Player name */}
-            <div className="flex items-center gap-2 shrink-0"
-              style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 12 }}>
-              {isMyTurn && <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: '#facc15', boxShadow: '0 0 6px #facc15' }} />}
-              <span className="text-sm font-bold" style={{ color: '#f9fafb' }}>{me.playerName}</span>
-            </div>
-          </div>
-
-          {/* Battlefield + side zones (fills remaining height) */}
-          <div className="flex-1 flex gap-2 px-3 py-2 overflow-hidden min-h-0">
-            {/* Main battlefield drop zone */}
-            <DropZone label="Battlefield" accept={['hand']} isOver={overBf}
-              onDragOver={() => setOverBf(true)} onDragLeave={() => setOverBf(false)}
-              onDrop={(data) => { setOverBf(false); if (data.source === 'hand') emit.playCard(data.instanceId); }}
-              className="flex-1 overflow-hidden">
-              <BattlefieldRows
-                cards={me.battlefield}
-                onTap={emit.tapCard}
-                onGraveyard={interceptGraveyard}
-                onExile={interceptExile}
-                onReturnCommander={emit.returnCmd}
-                onDragStart={(e, id) => dragStart(e, id, 'battlefield')}
-                onHover={setHoverCard}
-                onHoverEnd={() => setHoverCard(null)}
-              />
-            </DropZone>
-
-            {/* Side: graveyard + exile */}
-            <div className="shrink-0 flex flex-col gap-2 justify-center py-1">
-              <PileZone cards={me.graveyard} label="Graveyard" isOver={overGy}
-                onDragOver={() => setOverGy(true)} onDragLeave={() => setOverGy(false)}
-                onDrop={(d) => { setOverGy(false); emit.toGraveyard(d.instanceId); }}
-                onHover={setHoverCard} onHoverEnd={() => setHoverCard(null)}
-                accentColor="#9ca3af" onClick={() => setZoneModal('graveyard')} />
-              <PileZone cards={me.exile} label="Exile" isOver={overEx}
-                onDragOver={() => setOverEx(true)} onDragLeave={() => setOverEx(false)}
-                onDrop={(d) => { setOverEx(false); emit.toExile(d.instanceId); }}
-                onHover={setHoverCard} onHoverEnd={() => setHoverCard(null)}
-                accentColor="#a78bfa" onClick={() => setZoneModal('exile')} />
-            </div>
-          </div>
-
-          {/* Hand */}
-          <div className="shrink-0 flex items-end gap-1.5 px-5 pb-2 pt-1 overflow-x-auto"
-            style={{ height: 108, borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.25)' }}>
-            {me.hand.length === 0 ? (
-              <p className="text-xs italic self-center w-full text-center" style={{ color: 'rgba(255,255,255,0.08)' }}>
-                Hand empty — click Draw to draw a card
-              </p>
-            ) : (
-              me.hand.map((card) => {
-                const { playable, reason } = cardTimingStatus(card);
-                return (
-                  <div key={card.instanceId}
-                    draggable={playable}
-                    onDragStart={playable ? (e) => dragStart(e, card.instanceId, 'hand') : undefined}
-                    onClick={() => emit.playCard(card.instanceId)}
-                    onMouseEnter={() => setHoverCard(card)}
-                    onMouseLeave={() => setHoverCard(null)}
-                    className="shrink-0 transition-transform duration-150 origin-bottom relative group/card"
-                    style={{ width: 60, cursor: playable ? 'grab' : 'not-allowed', opacity: playable ? 1 : 0.45 }}
-                    onMouseOver={(e) => {
-                      if (playable) (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-16px) scale(1.08)';
-                    }}
-                    onMouseOut={(e) => {
-                      (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0) scale(1)';
-                      setHoverCard(null);
-                    }}
-                    title={playable ? `${card.name} — drag to battlefield or click to play` : `${card.name} — ${reason}`}>
-                    {card.imageUri
-                      ? <img src={card.imageUri} alt={card.name} className="w-full rounded-xl"
-                          style={{ boxShadow: '0 8px 20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08)' }} />
-                      : <CardBack style={{ width: 60, height: 84 }} />}
-                    {/* Reason tooltip on unplayable cards */}
-                    {!playable && (
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/card:block z-20 pointer-events-none"
-                        style={{ width: 140 }}>
-                        <div className="text-[9px] text-center px-2 py-1 rounded-lg font-medium leading-tight"
-                          style={{ background: '#1c0a0a', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5' }}>
-                          {reason}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })
             )}
           </div>
         </div>
+
+        {/* Zone counts */}
+        <div className="flex items-center gap-1.5 text-sm font-semibold"
+          style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 16 }}>
+          <button onClick={openLibraryModal} title="Search library"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
+            style={{ color: '#4b5563' }}>📚 {me.libraryCount}</button>
+          <span style={{ color: '#374151' }}>✋ {me.handCount}</span>
+          <button onClick={() => setZoneModal('graveyard')} title="View graveyard"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
+            style={{ color: me.graveyard.length > 0 ? '#9ca3af' : '#4b5563' }}>
+            🪦 {me.graveyard.length}
+          </button>
+          <button onClick={() => setZoneModal('exile')} title="View exile"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
+            style={{ color: me.exile.length > 0 ? '#a78bfa' : '#4b5563' }}>
+            ✦ {me.exile.length}
+          </button>
+          <button onClick={() => setShowTokenModal(true)} title="Create a token"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10 font-semibold"
+            style={{ color: '#4b9a5a', border: '1px solid rgba(74,154,90,0.3)', background: 'rgba(74,154,90,0.08)' }}>
+            ✦ Token
+          </button>
+        </div>
+
+        {/* Commander damage matrix */}
+        <div className="ml-auto shrink-0">
+          <CmdDamageMatrix players={gameState.players} mySocketId={mySocketId} onUpdate={emit.updateCmdDmg} />
+        </div>
+
+        {/* Player name */}
+        <div className="flex items-center gap-2 shrink-0"
+          style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 12 }}>
+          {isMyTurn && <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: '#facc15', boxShadow: '0 0 6px #facc15' }} />}
+          <span className="text-sm font-bold" style={{ color: '#f9fafb' }}>{me.playerName}</span>
+        </div>
       </div>
 
-      {/* Floating log overlay */}
+      {/* ── My hand (pinned at bottom) ── */}
+      <div className="shrink-0 flex items-end gap-1.5 px-5 pb-2 pt-1 overflow-x-auto"
+        style={{ height: 104, borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.3)' }}>
+        {me.hand.length === 0 ? (
+          <p className="text-xs italic self-center w-full text-center" style={{ color: 'rgba(255,255,255,0.08)' }}>
+            Hand empty — click Draw to draw a card
+          </p>
+        ) : (
+          me.hand.map((card) => {
+            const { playable, reason } = cardTimingStatus(card);
+            return (
+              <div key={card.instanceId}
+                draggable={playable}
+                onDragStart={playable ? (e) => dragStart(e, card.instanceId, 'hand') : undefined}
+                onClick={() => emit.playCard(card.instanceId)}
+                onMouseEnter={() => setHoverCard(card)}
+                onMouseLeave={() => setHoverCard(null)}
+                className="shrink-0 transition-transform duration-150 origin-bottom relative group/card"
+                style={{ width: 60, cursor: playable ? 'grab' : 'not-allowed', opacity: playable ? 1 : 0.45 }}
+                onMouseOver={(e) => {
+                  if (playable) (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-16px) scale(1.08)';
+                }}
+                onMouseOut={(e) => {
+                  (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0) scale(1)';
+                  setHoverCard(null);
+                }}
+                title={playable ? `${card.name} — drag to battlefield or click to play` : `${card.name} — ${reason}`}>
+                {card.imageUri
+                  ? <img src={card.imageUri} alt={card.name} className="w-full rounded-xl"
+                      style={{ boxShadow: '0 8px 20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08)' }} />
+                  : <CardBack style={{ width: 60, height: 84 }} />}
+                {!playable && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/card:block z-20 pointer-events-none"
+                    style={{ width: 140 }}>
+                    <div className="text-[9px] text-center px-2 py-1 rounded-lg font-medium leading-tight"
+                      style={{ background: '#1c0a0a', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5' }}>
+                      {reason}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* ── Floating log ── */}
       {showLog && (
         <div className="fixed right-4 bottom-4 w-72 rounded-xl overflow-hidden z-40"
           style={{ background: 'rgba(0,0,0,0.88)', border: '1px solid rgba(255,255,255,0.08)', maxHeight: 260 }}>
@@ -1002,47 +1249,40 @@ export default function GameBoardPage() {
         </div>
       )}
 
-      {/* Global hover preview */}
+      {/* ── Global hover preview ── */}
       {hoverCard && <HoverPreview card={hoverCard} x={mouse.x} y={mouse.y} />}
 
       {/* ── Zone modals ── */}
       {zoneModal === 'graveyard' && (
         <ZoneModal title="Graveyard" cards={me.graveyard} onClose={() => setZoneModal(null)} actions={[
-          { label: '↩ Return to Hand',        color: '#86efac', onCard: (c) => emit.toHand(c.instanceId) },
-          { label: '⚡ Return to Battlefield', color: '#fbbf24', onCard: (c) => emit.returnToBf(c.instanceId) },
-          { label: '⚡ Play from Graveyard',   color: '#fbbf24', onCard: (c) => emit.returnToBf(c.instanceId) },
+          { label: '↩ Return to Hand',           color: '#86efac', onCard: (c) => emit.toHand(c.instanceId) },
+          { label: '⚡ Return to Battlefield',   color: '#fbbf24', onCard: (c) => emit.returnToBf(c.instanceId) },
           { label: '🪄 Cast (Flashback/Unearth)', color: '#c4b5fd', onCard: (c) => emit.returnToBf(c.instanceId) },
-          { label: '✦ Exile',                  color: '#a78bfa', onCard: (c) => emit.toExile(c.instanceId) },
+          { label: '✦ Exile',                    color: '#a78bfa', onCard: (c) => emit.toExile(c.instanceId) },
         ]} />
       )}
       {zoneModal === 'exile' && (
         <ZoneModal title="Exile" cards={me.exile} onClose={() => setZoneModal(null)} actions={[
-          { label: '↩ Return to Hand',       color: '#86efac', onCard: (c) => emit.toHand(c.instanceId) },
-          { label: '⚡ Play from Exile',      color: '#fbbf24', onCard: (c) => emit.returnToBf(c.instanceId) },
-          { label: '⚡ Return to Battlefield', color: '#fbbf24', onCard: (c) => emit.returnToBf(c.instanceId) },
+          { label: '↩ Return to Hand',         color: '#86efac', onCard: (c) => emit.toHand(c.instanceId) },
+          { label: '⚡ Play from Exile',        color: '#fbbf24', onCard: (c) => emit.returnToBf(c.instanceId) },
+          { label: '⚡ Return to Battlefield',  color: '#fbbf24', onCard: (c) => emit.returnToBf(c.instanceId) },
         ]} />
       )}
       {zoneModal === 'library' && (
         <ZoneModal title="Library Search" cards={libraryCards} loading={libraryLoading}
           onClose={() => setZoneModal(null)} actions={[
-            { label: '↩ Tutor to Hand',       color: '#86efac', onCard: (c) => emit.tutor(c.instanceId, 'hand') },
-            { label: '⚡ Put on Battlefield',  color: '#fbbf24', onCard: (c) => emit.tutor(c.instanceId, 'battlefield') },
+            { label: '↩ Tutor to Hand',      color: '#86efac', onCard: (c) => emit.tutor(c.instanceId, 'hand') },
+            { label: '⚡ Put on Battlefield', color: '#fbbf24', onCard: (c) => emit.tutor(c.instanceId, 'battlefield') },
           ]} />
       )}
 
       {/* ── Timing error toast ── */}
       {timingToast && (
-        <div
-          className="fixed bottom-6 left-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-xl"
-          style={{
-            transform: 'translateX(-50%)',
-            background: '#180808',
+        <div className="fixed bottom-6 left-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-xl"
+          style={{ transform: 'translateX(-50%)', background: '#180808',
             border: '1px solid rgba(239,68,68,0.45)',
             boxShadow: '0 8px 32px rgba(0,0,0,0.85), 0 0 20px rgba(239,68,68,0.1)',
-            maxWidth: 440,
-            animation: 'fadeInUp 0.2s ease',
-          }}
-        >
+            maxWidth: 440 }}>
           <span className="text-lg shrink-0">⛔</span>
           <span className="text-sm font-medium" style={{ color: '#fca5a5' }}>{timingToast}</span>
           <button onClick={() => setTimingToast(null)}
@@ -1051,15 +1291,22 @@ export default function GameBoardPage() {
         </div>
       )}
 
-      {/* ── Commander replacement popup (EDH rule) ── */}
+      {/* ── Token creation modal ── */}
+      {showTokenModal && (
+        <TokenCreateModal
+          onClose={() => setShowTokenModal(false)}
+          onCreate={(name, power, toughness, color, typeLine) =>
+            emit.createToken(name, power, toughness, color, typeLine)
+          }
+        />
+      )}
+
+      {/* ── Commander replacement popup ── */}
       {commanderPopup && (
         <CommanderReplacementPopup
           cardName={commanderPopup.cardName}
           destination={commanderPopup.destination}
-          onCommandZone={() => {
-            emit.returnCmd(commanderPopup.instanceId);
-            setCommanderPopup(null);
-          }}
+          onCommandZone={() => { emit.returnCmd(commanderPopup.instanceId); setCommanderPopup(null); }}
           onStay={() => {
             if (commanderPopup.destination === 'graveyard') emit.toGraveyard(commanderPopup.instanceId);
             else emit.toExile(commanderPopup.instanceId);
