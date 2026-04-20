@@ -580,6 +580,67 @@ function MiniPile({ cards, label, color, onHover, onHoverEnd }: {
   );
 }
 
+// ── Canvas pile zone (my graveyard / exile on the canvas) ─────────────────────
+
+function CanvasPileZone({ cards, icon, label, color, bgColor, isOver,
+  onDragOver, onDragLeave, onDrop, onClick, onHover, onHoverEnd,
+}: {
+  cards: GameCard[]; icon: string; label: string;
+  color: string; bgColor: string; isOver: boolean;
+  onDragOver: () => void; onDragLeave: () => void;
+  onDrop: (d: DragData) => void; onClick: () => void;
+  onHover: (c: GameCard) => void; onHoverEnd: () => void;
+}) {
+  const topCard = cards[cards.length - 1];
+  return (
+    <div style={{
+      position: 'relative', width: 130, height: 182, borderRadius: 12, overflow: 'hidden',
+      border: isOver ? `2px solid ${color}` : `2px dashed ${color}55`,
+      background: isOver ? `${bgColor}35` : `${bgColor}18`,
+      cursor: 'pointer', transition: 'border-color 0.12s, background 0.12s',
+      boxShadow: isOver ? `0 0 24px ${color}50` : 'none',
+    }}
+      onClick={onClick}
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); onDragOver(); }}
+      onDragLeave={(e) => { e.stopPropagation(); onDragLeave(); }}
+      onDrop={(e) => {
+        e.preventDefault(); e.stopPropagation();
+        try { onDrop(JSON.parse(e.dataTransfer.getData('application/json'))); } catch { /* */ }
+      }}
+      onMouseDown={(e) => e.stopPropagation()}>
+
+      {/* Top card art */}
+      {topCard?.imageUri && (
+        <img src={topCard.imageUri}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.55 }}
+          onMouseEnter={() => onHover(topCard)} onMouseLeave={onHoverEnd} />
+      )}
+
+      {/* Scrim so label is always readable */}
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.75) 30%, rgba(0,0,0,0.1) 100%)' }} />
+
+      {/* Icon + label */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', gap: 4, pointerEvents: 'none' }}>
+        {!topCard && <span style={{ fontSize: 32, opacity: 0.45 }}>{icon}</span>}
+        <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1.5, color: `${color}dd`,
+          textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>
+          {label.toUpperCase()}
+        </span>
+        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', pointerEvents: 'none' }}>
+          drag cards here
+        </span>
+      </div>
+
+      {/* Card count badge */}
+      <div style={{ position: 'absolute', bottom: 6, right: 6, background: 'rgba(0,0,0,0.88)',
+        borderRadius: 6, padding: '2px 7px', border: `1px solid ${color}70` }}>
+        <span style={{ fontSize: 13, fontWeight: 900, color, fontFamily: 'monospace' }}>{cards.length}</span>
+      </div>
+    </div>
+  );
+}
+
 // ── Opponent zone header (rendered inside canvas) ─────────────────────────────
 
 function ZoneHeader({ player, color }: { player: PersonalPlayerState; color: string }) {
@@ -633,16 +694,25 @@ interface TableCanvasProps {
   onBfCardHover: (id: string | null) => void;
   onUpdateCounter: (instanceId: string, counter: string, delta: number) => void;
   onSetPt: (instanceId: string, power: string, toughness: string) => void;
+  onDropToGy: (d: DragData) => void;
+  onDropToEx: (d: DragData) => void;
+  onOpenGy: () => void;
+  onOpenEx: () => void;
+  gyCards: GameCard[];
+  exCards: GameCard[];
 }
 
 function TableCanvas({
   me, opponents,
   onTapCard, onGraveyardCard, onExileCard, onReturnCmdCard, onDragStartCard,
   onPlayCard, onHover, onHoverEnd, onBfCardHover, onUpdateCounter, onSetPt,
+  onDropToGy, onDropToEx, onOpenGy, onOpenEx, gyCards, exCards,
 }: TableCanvasProps) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(0.4);
   const [overBf, setOverBf] = useState(false);
+  const [overGy, setOverGy] = useState(false);
+  const [overEx, setOverEx] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const cur = useRef({ pan: { x: 0, y: 0 }, zoom: 0.4 });
   cur.current = { pan, zoom };
@@ -879,6 +949,29 @@ function TableCanvas({
               })}
             </React.Fragment>
           ))}
+
+          {/* ── Graveyard + Exile drop zones ── */}
+          <div style={{ position: 'absolute', bottom: 14, right: 14, display: 'flex', gap: 14, zIndex: 4 }}
+            onMouseDown={e => e.stopPropagation()}>
+            <CanvasPileZone
+              cards={gyCards} icon="🪦" label="Graveyard" color="#9ca3af" bgColor="#374151"
+              isOver={overGy}
+              onDragOver={() => setOverGy(true)}
+              onDragLeave={() => setOverGy(false)}
+              onDrop={(d) => { setOverGy(false); onDropToGy(d); }}
+              onClick={onOpenGy}
+              onHover={onHover} onHoverEnd={onHoverEnd}
+            />
+            <CanvasPileZone
+              cards={exCards} icon="✦" label="Exile" color="#a78bfa" bgColor="#4c1d95"
+              isOver={overEx}
+              onDragOver={() => setOverEx(true)}
+              onDragLeave={() => setOverEx(false)}
+              onDrop={(d) => { setOverEx(false); onDropToEx(d); }}
+              onClick={onOpenEx}
+              onHover={onHover} onHoverEnd={onHoverEnd}
+            />
+          </div>
         </div>
       </div>
 
@@ -1344,6 +1437,18 @@ export default function GameBoardPage() {
           onBfCardHover={(id) => { hoverBfCardId.current = id; }}
           onUpdateCounter={emit.updateCounter}
           onSetPt={emit.setPt}
+          gyCards={me.graveyard}
+          exCards={me.exile}
+          onDropToGy={(d) => {
+            if (d.source === 'hand') emit.toGraveyard(d.instanceId);
+            else interceptGraveyard(d.instanceId);
+          }}
+          onDropToEx={(d) => {
+            if (d.source === 'hand') emit.toExile(d.instanceId);
+            else interceptExile(d.instanceId);
+          }}
+          onOpenGy={() => setZoneModal('graveyard')}
+          onOpenEx={() => setZoneModal('exile')}
         />
       </div>
 
