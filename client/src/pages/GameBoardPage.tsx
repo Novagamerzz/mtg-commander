@@ -250,13 +250,13 @@ function TappedCardWrapper({ card, cardW, cardH, children, className = '' }: {
 
 const COUNTER_TYPES = ['+1/+1', '-1/-1', 'loyalty', 'charge', 'time', 'poison'] as const;
 
-const COUNTER_META: Record<string, { sym: string; color: string; bg: string }> = {
-  '+1/+1':   { sym: '+1/+1', color: '#4ade80', bg: '#166534' },
-  '-1/-1':   { sym: '-1/-1', color: '#f87171', bg: '#7f1d1d' },
-  'loyalty': { sym: '⚜',    color: '#fbbf24', bg: '#78350f' },
-  'charge':  { sym: '⚡',   color: '#93c5fd', bg: '#1e3a8a' },
-  'time':    { sym: '⏳',   color: '#e2e8f0', bg: '#334155' },
-  'poison':  { sym: '☠',   color: '#d8b4fe', bg: '#4c1d95' },
+const COUNTER_META: Record<string, { sym: string; label: string; color: string; bg: string }> = {
+  '+1/+1':   { sym: '+1/+1', label: '+1/+1',  color: '#4ade80', bg: '#166534' },
+  '-1/-1':   { sym: '-1/-1', label: '-1/-1',  color: '#f87171', bg: '#7f1d1d' },
+  'loyalty': { sym: '⚜',    label: 'Loyalty', color: '#fbbf24', bg: '#78350f' },
+  'charge':  { sym: '⚡',   label: 'Charge',  color: '#93c5fd', bg: '#1e3a8a' },
+  'time':    { sym: '⏳',   label: 'Time',    color: '#e2e8f0', bg: '#334155' },
+  'poison':  { sym: '☠',   label: 'Poison',  color: '#d8b4fe', bg: '#4c1d95' },
 };
 
 function CounterBadge({ type, count }: { type: string; count: number }) {
@@ -365,76 +365,100 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
 
       {/* Main menu */}
       {menuMode === 'main' && (() => {
-        const mw = 192, mh = 380;
+        const mw = 240, mh = 460;
         const ml = menuPos.x + mw + 8 > window.innerWidth ? menuPos.x - mw : menuPos.x + 4;
         const mt = menuPos.y + mh + 8 > window.innerHeight ? menuPos.y - mh : menuPos.y;
+        const btnStyle: React.CSSProperties = {
+          width: 26, height: 26, borderRadius: 6, background: '#1e293b',
+          border: '1px solid #334155', color: '#cbd5e1', fontSize: 16,
+          lineHeight: 1, cursor: 'pointer', flexShrink: 0, display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+        };
         return (
-        <div className="rounded-xl py-1"
+        <div className="rounded-xl"
           style={{ position: 'fixed', left: ml, top: mt, width: mw, zIndex: 9999,
-            background: '#0f172a', border: '1px solid #1e293b',
-            boxShadow: '0 24px 48px rgba(0,0,0,0.9)' }}
+            background: '#0f172a', border: '1px solid #334155',
+            boxShadow: '0 24px 56px rgba(0,0,0,0.95)' }}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}>
 
-          {/* Header row with X */}
-          <div style={{ display: 'flex', alignItems: 'center', padding: '2px 8px 4px 12px',
-            borderBottom: '1px solid #1e293b', marginBottom: 2 }}>
-            <span style={{ fontSize: 9, color: '#475569', fontWeight: 700, letterSpacing: 1, flex: 1 }}>
-              {card.name.split(',')[0].slice(0, 20)}
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', padding: '10px 10px 10px 14px',
+            borderBottom: '1px solid #1e293b' }}>
+            <span style={{ fontSize: 14, color: '#e2e8f0', fontWeight: 700, flex: 1,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {card.name.split(',')[0]}
             </span>
             <button onClick={closeMenu}
-              style={{ color: '#475569', fontSize: 14, lineHeight: 1, padding: '2px 4px',
-                cursor: 'pointer', background: 'none', border: 'none' }}>✕</button>
+              style={{ width: 28, height: 28, borderRadius: 6, background: '#1e293b',
+                border: '1px solid #334155', color: '#94a3b8', fontSize: 16,
+                lineHeight: 1, cursor: 'pointer', display: 'flex',
+                alignItems: 'center', justifyContent: 'center' }}>✕</button>
           </div>
 
           {/* Basic actions */}
-          {[
-            { label: card.tapped ? '↺ Untap' : '↻ Tap', action: () => { onTap(); closeMenu(); },            color: '#e2e8f0' },
-            { label: '→ Graveyard',                        action: () => { onGraveyard(); closeMenu(); },       color: '#94a3b8' },
-            { label: '→ Exile',                            action: () => { onExile(); closeMenu(); },           color: '#a78bfa' },
-            { label: '⚜ Cmd Zone',                        action: () => { onReturnCommander(); closeMenu(); }, color: '#fbbf24' },
-          ].map(({ label, action, color }) => (
-            <button key={label} onClick={action}
-              className="w-full text-left px-3 py-1.5 text-xs hover:bg-white/5 transition"
-              style={{ color }}>{label}</button>
-          ))}
+          <div style={{ padding: '6px 0' }}>
+            {[
+              { label: card.tapped ? '↺ Untap' : '↻ Tap', action: () => { onTap(); closeMenu(); },            color: '#f1f5f9' },
+              { label: '→ Graveyard',                        action: () => { onGraveyard(); closeMenu(); },       color: '#94a3b8' },
+              { label: '→ Exile',                            action: () => { onExile(); closeMenu(); },           color: '#c4b5fd' },
+              { label: '⚜ Command Zone',                    action: () => { onReturnCommander(); closeMenu(); }, color: '#fbbf24' },
+            ].map(({ label, action, color }) => (
+              <button key={label} onClick={action}
+                style={{ display: 'block', width: '100%', textAlign: 'left',
+                  padding: '8px 14px', fontSize: 14, fontWeight: 500,
+                  color, background: 'none', border: 'none', cursor: 'pointer' }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}>
+                {label}
+              </button>
+            ))}
+          </div>
 
-          {/* Counter section */}
-          <div style={{ borderTop: '1px solid #1e293b', marginTop: 2, paddingTop: 2 }}>
-            <p style={{ fontSize: 8, color: '#475569', padding: '3px 10px 2px', fontWeight: 700, letterSpacing: 1 }}>
-              COUNTERS  <span style={{ color: '#334155', fontWeight: 400 }}>(hover card + +/−)</span>
-            </p>
+          {/* Counters */}
+          <div style={{ borderTop: '1px solid #1e293b', padding: '6px 0' }}>
+            <p style={{ fontSize: 11, color: '#64748b', padding: '2px 14px 6px',
+              fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>Counters</p>
             {COUNTER_TYPES.map((type) => {
               const m = COUNTER_META[type];
               const n = counters[type] ?? 0;
               return (
-                <div key={type} style={{ display: 'flex', alignItems: 'center', padding: '2px 8px 2px 10px', gap: 4 }}>
-                  <span style={{ fontSize: 9, color: m.color, fontWeight: 700, minWidth: 38, letterSpacing: 0.5 }}>{m.sym}</span>
+                <div key={type} style={{ display: 'flex', alignItems: 'center',
+                  padding: '4px 10px 4px 14px', gap: 8 }}>
+                  <span style={{ fontSize: 14, color: m.color, fontWeight: 700, flex: 1 }}>
+                    {m.label}
+                  </span>
                   <button onMouseDown={(e) => e.stopPropagation()}
-                    onClick={() => onUpdateCounter(type, -1)}
-                    style={{ width: 18, height: 18, borderRadius: 4, background: '#1e293b', border: '1px solid #334155',
-                      color: '#64748b', fontSize: 14, lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}>−</button>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: n > 0 ? m.color : '#334155',
-                    minWidth: 20, textAlign: 'center' }}>{n}</span>
+                    onClick={() => onUpdateCounter(type, -1)} style={btnStyle}>−</button>
+                  <span style={{ fontSize: 14, fontWeight: 800,
+                    color: n > 0 ? m.color : '#475569', minWidth: 24, textAlign: 'center' }}>{n}</span>
                   <button onMouseDown={(e) => e.stopPropagation()}
-                    onClick={() => onUpdateCounter(type, 1)}
-                    style={{ width: 18, height: 18, borderRadius: 4, background: '#1e293b', border: '1px solid #334155',
-                      color: '#64748b', fontSize: 14, lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}>+</button>
+                    onClick={() => onUpdateCounter(type, 1)} style={btnStyle}>+</button>
                 </div>
               );
             })}
             {hasCounters && (
               <button onClick={() => { Object.keys(counters).forEach((t) => onUpdateCounter(t, -(counters[t] ?? 0))); closeMenu(); }}
-                className="w-full text-left px-3 py-1 text-xs hover:bg-white/5 transition"
-                style={{ color: '#ef4444', marginTop: 2 }}>× Clear all counters</button>
+                style={{ display: 'block', width: '100%', textAlign: 'left',
+                  padding: '8px 14px', fontSize: 13, color: '#f87171',
+                  background: 'none', border: 'none', cursor: 'pointer', marginTop: 2 }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}>
+                × Clear all counters
+              </button>
             )}
           </div>
 
-          {/* P/T section */}
-          <div style={{ borderTop: '1px solid #1e293b', marginTop: 2, paddingTop: 2 }}>
+          {/* P/T */}
+          <div style={{ borderTop: '1px solid #1e293b', padding: '6px 0' }}>
             <button onClick={() => { setPtPow(card.powerOverride ?? ''); setPtTou(card.toughnessOverride ?? ''); setMenuMode('pt'); }}
-              className="w-full text-left px-3 py-1.5 text-xs hover:bg-white/5 transition"
-              style={{ color: '#7dd3fc' }}>⚙ Set Power/Toughness</button>
+              style={{ display: 'block', width: '100%', textAlign: 'left',
+                padding: '8px 14px', fontSize: 14, color: '#7dd3fc',
+                background: 'none', border: 'none', cursor: 'pointer' }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}>
+              ⚙ Set Power / Toughness
+            </button>
           </div>
         </div>
         );
@@ -442,7 +466,7 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
 
       {/* Set P/T sub-menu */}
       {menuMode === 'pt' && (() => {
-        const mw = 192, mh = 130;
+        const mw = 240, mh = 140;
         const ml = menuPos.x + mw + 8 > window.innerWidth ? menuPos.x - mw : menuPos.x + 4;
         const mt = menuPos.y + mh + 8 > window.innerHeight ? menuPos.y - mh : menuPos.y;
         return (
