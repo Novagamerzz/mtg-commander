@@ -1798,6 +1798,22 @@ export default function GameBoardPage() {
       if (announcementTimer.current) clearTimeout(announcementTimer.current);
       announcementTimer.current = setTimeout(() => setAnnouncement(null), 6000);
     });
+    socket.on('cardCounterUpdate', ({ playerId, instanceId, counters }) => {
+      setGameState((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          players: prev.players.map((p) =>
+            p.socketId !== playerId ? p : {
+              ...p,
+              battlefield: p.battlefield.map((c) =>
+                c.instanceId !== instanceId ? c : { ...c, counters }
+              ),
+            }
+          ),
+        };
+      });
+    });
     rejoin();
     return () => {
       socket.off('connect', rejoin);
@@ -1808,6 +1824,7 @@ export default function GameBoardPage() {
       socket.off('game:dice_result');
       socket.off('game:error');
       socket.off('game:announcement');
+      socket.off('cardCounterUpdate');
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (announcementTimer.current) clearTimeout(announcementTimer.current);
     };

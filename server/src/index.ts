@@ -707,7 +707,12 @@ io.on('connection', (socket) => {
     if (card.counters[counter] === 0) delete card.counters[counter];
     if (delta !== 0) {
       appendLog(game, `${player.playerName}: ${card.name} ${delta > 0 ? '+' : ''}${delta} ${counter} counter`);
-      broadcastGame(game);
+      io.to(game.roomId).emit('cardCounterUpdate', {
+        roomId: game.roomId,
+        playerId: player.socketId,
+        instanceId,
+        counters: card.counters ?? {},
+      });
     }
   });
 

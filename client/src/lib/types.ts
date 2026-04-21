@@ -120,6 +120,7 @@ export interface ServerToClientEvents {
   'game:scry_cards': (cards: GameCard[]) => void;
   'game:mill_result': (cards: GameCard[]) => void;
   'game:dice_result': (data: { playerName: string; sides: number; result: number }) => void;
+  'cardCounterUpdate': (data: { roomId: string; playerId: string; instanceId: string; counters: Record<string, number> }) => void;
   'player:joined': (player: Player) => void;
   'player:left': (playerId: string) => void;
   'chat:message': (payload: ChatMessage) => void;
