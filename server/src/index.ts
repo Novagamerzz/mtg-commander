@@ -90,6 +90,7 @@ interface InternalRoom {
 const rooms = new Map<string, InternalRoom>();
 const games = new Map<string, InternalGame>();
 const socketToRoom = new Map<string, string>();
+const userIdToRoom = new Map<string, string>(); // survives socket reconnects
 
 // ── Express ───────────────────────────────────────────────────────────────────
 
@@ -391,6 +392,7 @@ io.on('connection', (socket) => {
     };
     rooms.set(roomId, room);
     socketToRoom.set(socket.id, roomId);
+    userIdToRoom.set(userId, roomId);
     socket.leave('lobby');
     socket.join(roomId);
     socket.emit('room:updated', toPublicRoom(room));
@@ -414,6 +416,7 @@ io.on('connection', (socket) => {
     }
     room.players.push({ socketId: socket.id, userId, playerName, deckId: null, deckName: null, deckCards: [] });
     socketToRoom.set(socket.id, roomId);
+    userIdToRoom.set(userId, roomId);
     socket.leave('lobby');
     socket.join(roomId);
     broadcastRoom(room);
@@ -466,8 +469,30 @@ io.on('connection', (socket) => {
 
   // ─── Game ────────────────────────────────────────────────────────────────────
 
-  socket.on('game:rejoin', () => {
-    const roomId = socketToRoom.get(socket.id);
+  socket.on('game:rejoin', (payload) => {
+    // Try direct lookup first (same socket ID as before)
+    let roomId = socketToRoom.get(socket.id);
+
+    // Fallback: find by userId when socket ID changed after reconnect
+    if (!roomId && payload?.userId) {
+      roomId = userIdToRoom.get(payload.userId);
+      if (roomId) {
+        // Re-bind the new socket ID
+        socketToRoom.set(socket.id, roomId);
+        const game = games.get(roomId);
+        if (game) {
+          const player = game.players.find((p) => p.userId === payload.userId);
+          if (player) {
+            // Remove stale socket mapping and update player's socket ID
+            socketToRoom.delete(player.socketId);
+            player.socketId = socket.id;
+            socket.join(roomId);
+            console.log(`[game:rejoin] ${player.playerName} re-bound ${socket.id}`);
+          }
+        }
+      }
+    }
+
     const game = roomId ? games.get(roomId) : undefined;
     if (game) {
       socket.emit('game:state', toPersonalState(game, socket.id));

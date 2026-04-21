@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { socket } from '../lib/socket';
+import { useAuth } from '../contexts/AuthContext';
 import type { PersonalGameState, PersonalPlayerState, GameCard, TurnPhase } from '../lib/types';
 
 // ── Zone viewer modal ─────────────────────────────────────────────────────────
@@ -1601,6 +1602,7 @@ function TokenCreateModal({ onClose, onCreate }: {
 export default function GameBoardPage() {
   const { roomId: _roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [gameState, setGameState] = useState<PersonalGameState | null>(null);
   const [showLog, setShowLog] = useState(false);
   const [hoverCard, setHoverCard] = useState<GameCard | null>(null);
@@ -1632,7 +1634,11 @@ export default function GameBoardPage() {
   const commanderScryfallId = useRef<string | null>(null);
 
   useEffect(() => {
+    const userId = user?.id;
+    const rejoin = () => socket.emit('game:rejoin', { userId });
+
     if (!socket.connected) socket.connect();
+    socket.on('connect', rejoin);
     socket.on('game:state', setGameState);
     socket.on('game:library_contents', (cards) => { setLibraryCards(cards); setLibraryLoading(false); });
     socket.on('game:scry_cards', (cards) => { setScryCards(cards); setScryInputOpen(false); });
@@ -1652,8 +1658,9 @@ export default function GameBoardPage() {
       if (announcementTimer.current) clearTimeout(announcementTimer.current);
       announcementTimer.current = setTimeout(() => setAnnouncement(null), 6000);
     });
-    socket.emit('game:rejoin');
+    rejoin();
     return () => {
+      socket.off('connect', rejoin);
       socket.off('game:state', setGameState);
       socket.off('game:library_contents');
       socket.off('game:scry_cards');
@@ -1664,7 +1671,7 @@ export default function GameBoardPage() {
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (announcementTimer.current) clearTimeout(announcementTimer.current);
     };
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     const me = gameState?.players.find((p) => p.socketId === gameState.mySocketId);
