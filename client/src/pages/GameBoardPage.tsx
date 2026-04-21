@@ -1931,8 +1931,7 @@ export default function GameBoardPage() {
         setHoverCard(null); return;
       }
       if (k === 'h' || k === 'H') { socket.emit('game:move_to_hand', { instanceId: id }); setHoverCard(null); return; }
-      if (k === 'c' || k === 'C') { if (isCmd) { socket.emit('game:return_commander', { instanceId: id }); setHoverCard(null); } return; }
-      if (k === 'd' || k === 'D') { socket.emit('game:copy_card', { instanceId: id }); return; }
+      if (k === 'c' || k === 'C') { socket.emit('game:copy_card', { instanceId: id }); return; }
       if (k === 'f' || k === 'F') { socket.emit('game:flip_card', { instanceId: id }); return; }
       if (k === '+' || k === '=') { socket.emit('game:update_counter', { instanceId: id, counter: '+1/+1', delta: 1 }); return; }
       if (k === '-' || k === '_') { socket.emit('game:update_counter', { instanceId: id, counter: '+1/+1', delta: -1 }); return; }
@@ -2642,8 +2641,7 @@ export default function GameBoardPage() {
               ['G', 'Send to Graveyard'],
               ['E', 'Exile'],
               ['H', 'Return to Hand'],
-              ['C', 'Return to Command Zone (commanders only)'],
-              ['D', 'Duplicate / Copy card'],
+              ['C', 'Duplicate / Copy card'],
               ['F', 'Flip Face Down / Face Up'],
               ['+  /  =', 'Add +1/+1 counter'],
               ['−', 'Remove +1/+1 counter'],
