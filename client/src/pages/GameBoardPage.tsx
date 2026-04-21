@@ -1992,7 +1992,8 @@ export default function GameBoardPage() {
       {/* ── Header ── */}
       <header className="shrink-0 flex items-center gap-4 px-5"
         style={{ height: 52, background: 'rgba(0,0,0,0.55)',
-          borderBottom: '1px solid rgba(255,255,255,0.06)', backdropFilter: 'blur(8px)' }}>
+          borderBottom: '1px solid rgba(255,255,255,0.06)', backdropFilter: 'blur(8px)',
+          position: 'relative', zIndex: 50 }}>
         <div className="shrink-0 flex items-center gap-2">
           <span className="text-xs font-mono" style={{ color: '#4b5563' }}>T{gameState.turn}</span>
           <span className="text-sm font-bold" style={{ color: isMyTurn ? '#facc15' : '#e5e7eb' }}>
