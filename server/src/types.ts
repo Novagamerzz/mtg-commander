@@ -84,6 +84,7 @@ export interface PersonalPlayerState {
   isActive: boolean;
   commanderCastCount: number;
   landsPlayedThisTurn: number;
+  eliminated: boolean;
 }
 
 export interface PersonalGameState {
@@ -95,6 +96,7 @@ export interface PersonalGameState {
   phase: TurnPhase;
   turn: number;
   log: string[];
+  pendingElimination: { socketId: string; playerName: string; reason: string } | null;
 }
 
 // ── Socket Events ─────────────────────────────────────────────────────────────
@@ -142,6 +144,8 @@ export interface ClientToServerEvents {
   'game:update_counter': (payload: { instanceId: string; counter: string; delta: number }) => void;
   'game:set_pt': (payload: { instanceId: string; power: string; toughness: string }) => void;
   'game:give_control': (payload: { instanceId: string; targetSocketId: string }) => void;
+  'game:confirm_elimination': (payload: { targetSocketId: string }) => void;
+  'game:cancel_elimination': () => void;
   'game:join': (payload: { gameId: string; playerName: string }) => void;
   'player:update_life': (payload: { delta: number }) => void;
   'chat:send': (message: string) => void;

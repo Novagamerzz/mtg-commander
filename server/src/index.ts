@@ -49,6 +49,7 @@ interface InternalPlayer {
   library: InternalCard[];
   commanderCastCount: number;
   landsPlayedThisTurn: number;
+  eliminated: boolean;
 }
 
 interface InternalGame {
@@ -59,6 +60,7 @@ interface InternalGame {
   phase: TurnPhase;
   turn: number;
   log: string[];
+  pendingElimination: { socketId: string; playerName: string; reason: string } | null;
 }
 
 interface InternalRoomPlayer {
@@ -144,6 +146,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
     phase: game.phase,
     turn: game.turn,
     log: game.log,
+    pendingElimination: game.pendingElimination,
     players: game.players.map((p, i): PersonalPlayerState => ({
       socketId: p.socketId,
       playerName: p.playerName,
@@ -160,6 +163,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
       isActive: i === game.activePlayerIndex,
       commanderCastCount: p.commanderCastCount,
       landsPlayedThisTurn: p.landsPlayedThisTurn,
+      eliminated: p.eliminated,
     })),
   };
 }
@@ -235,6 +239,7 @@ function createGame(room: InternalRoom): InternalGame {
       library: libraryCards,
       commanderCastCount: 0,
       landsPlayedThisTurn: 0,
+      eliminated: false,
     };
   });
 
@@ -246,6 +251,7 @@ function createGame(room: InternalRoom): InternalGame {
     phase: 'untap',
     turn: 1,
     log: [`Game started! ${players[0].playerName} goes first.`],
+    pendingElimination: null,
   };
 }
 
@@ -269,7 +275,15 @@ function advancePhase(game: InternalGame) {
 }
 
 function advanceTurn(game: InternalGame) {
-  game.activePlayerIndex = (game.activePlayerIndex + 1) % game.players.length;
+  const total = game.players.length;
+  let next = (game.activePlayerIndex + 1) % total;
+  let guard = 0;
+  while (game.players[next].eliminated && guard < total) {
+    appendLog(game, `${game.players[next].playerName} was eliminated — turn skipped`);
+    next = (next + 1) % total;
+    guard++;
+  }
+  game.activePlayerIndex = next;
   game.turn++;
   game.phase = 'untap';
 
@@ -502,9 +516,13 @@ io.on('connection', (socket) => {
     const game = getGame(socket.id);
     if (!game) return;
     const player = game.players.find((p) => p.socketId === socket.id);
-    if (!player) return;
+    if (!player || player.eliminated) return;
+    const prevLife = player.life;
     player.life = Math.max(0, player.life + delta);
     appendLog(game, `${player.playerName}: life → ${player.life}`);
+    if (prevLife > 0 && player.life <= 0 && !game.pendingElimination) {
+      game.pendingElimination = { socketId: player.socketId, playerName: player.playerName, reason: `Life: ${player.life}` };
+    }
     broadcastGame(game);
   });
 
@@ -525,15 +543,13 @@ io.on('connection', (socket) => {
     player.life = Math.max(0, player.life - actualDelta);
     appendLog(game, `${player.playerName}: ${actualDelta > 0 ? `−${actualDelta}` : `+${-actualDelta}`} from commander damage → life ${player.life}`);
 
-    // Win condition: 21 commander damage from a single commander
-    if (next >= 21 && prev < 21) {
+    if (next >= 21 && prev < 21 && !player.eliminated && !game.pendingElimination) {
       const attacker = game.players.find((p) => p.socketId === fromSocketId);
-      const cmdName = (attacker?.commandZone[0]?.name ?? attacker?.playerName ?? 'Unknown Commander').split(',')[0];
-      const msg = `💀 ${player.playerName} has been defeated by ${cmdName} commander damage!`;
-      appendLog(game, msg);
-      for (const p of game.players) {
-        io.to(p.socketId).emit('game:announcement', { message: msg, type: 'defeat' });
-      }
+      const cmdName = (attacker?.commandZone[0]?.name ?? attacker?.playerName ?? 'Unknown').split(',')[0];
+      game.pendingElimination = {
+        socketId: player.socketId, playerName: player.playerName,
+        reason: `21 commander damage from ${cmdName}`,
+      };
     }
 
     broadcastGame(game);
@@ -720,6 +736,48 @@ io.on('connection', (socket) => {
       player.battlefield.push(card);
       appendLog(game, `${player.playerName} put ${card.name} onto the battlefield`);
     }
+    broadcastGame(game);
+  });
+
+  socket.on('game:confirm_elimination', ({ targetSocketId }) => {
+    const game = getGame(socket.id);
+    if (!game || game.pendingElimination?.socketId !== targetSocketId) return;
+    const target = game.players.find((p) => p.socketId === targetSocketId);
+    if (!target || target.eliminated) return;
+
+    target.eliminated = true;
+    // Move all battlefield cards to graveyard
+    target.graveyard.push(...target.battlefield);
+    target.battlefield = [];
+    game.pendingElimination = null;
+    appendLog(game, `${target.playerName} has been eliminated!`);
+
+    // If it was their turn, advance to next alive player
+    if (game.players[game.activePlayerIndex].socketId === targetSocketId) {
+      advanceTurn(game);
+    }
+
+    // Check win condition
+    const alive = game.players.filter((p) => !p.eliminated);
+    let msg: string;
+    if (alive.length <= 1) {
+      msg = alive.length === 1 ? `🏆 ${alive[0].playerName} wins!` : '🏆 Game over!';
+      appendLog(game, msg);
+    } else {
+      msg = `💀 ${target.playerName} has been eliminated!`;
+    }
+    for (const p of game.players) {
+      io.to(p.socketId).emit('game:announcement', { message: msg, type: alive.length <= 1 ? 'info' : 'defeat' });
+    }
+
+    broadcastGame(game);
+  });
+
+  socket.on('game:cancel_elimination', () => {
+    const game = getGame(socket.id);
+    if (!game || !game.pendingElimination) return;
+    appendLog(game, `Elimination of ${game.pendingElimination.playerName} was undone`);
+    game.pendingElimination = null;
     broadcastGame(game);
   });
 

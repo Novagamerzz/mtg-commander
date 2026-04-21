@@ -128,6 +128,41 @@ function CommanderReplacementPopup({ cardName, destination, onCommandZone, onSta
   );
 }
 
+function DeathConfirmationPopup({ pending, onConfirm, onCancel }: {
+  pending: { socketId: string; playerName: string; reason: string };
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[85] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}>
+      <div className="rounded-2xl p-7 max-w-sm w-full mx-4 text-center flex flex-col items-center gap-4"
+        style={{ background: '#0c0808', border: '2px solid rgba(239,68,68,0.45)',
+          boxShadow: '0 0 60px rgba(239,68,68,0.2), 0 40px 80px rgba(0,0,0,0.95)' }}>
+        <span style={{ fontSize: 52 }}>💀</span>
+        <div>
+          <p className="text-xl font-black" style={{ color: '#fca5a5', lineHeight: 1.3 }}>
+            {pending.playerName} has been defeated!
+          </p>
+          <p className="text-sm mt-2" style={{ color: '#6b7280' }}>{pending.reason}</p>
+        </div>
+        <div className="flex gap-3 w-full">
+          <button onClick={onConfirm}
+            className="flex-1 py-3 rounded-xl font-bold text-sm transition hover:brightness-110"
+            style={{ background: 'rgba(220,38,38,0.25)', border: '1px solid rgba(220,38,38,0.5)', color: '#fca5a5', cursor: 'pointer' }}>
+            Confirm Elimination
+          </button>
+          <button onClick={onCancel}
+            className="flex-1 py-3 rounded-xl font-semibold text-sm transition hover:bg-white/10"
+            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#9ca3af', cursor: 'pointer' }}>
+            Undo
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Battlefield row organisation ──────────────────────────────────────────────
 
 const TYPE_ROWS: { label: string; match: (t: string) => boolean; isLand?: boolean }[] = [
@@ -807,11 +842,22 @@ function TableCanvas({
             <div key={player.socketId} style={{
               position: 'absolute', left: zone.x, top: zone.y, width: zone.w, height: zone.h,
               borderRadius: 14,
-              border: player.isActive ? `2px solid ${color}cc` : `2px solid ${color}55`,
-              background: player.isActive ? `${color}18` : `${color}0e`,
-              boxShadow: player.isActive ? `0 0 50px ${color}28, inset 0 0 30px ${color}08` : `inset 0 0 20px ${color}06`,
+              border: player.eliminated ? '2px solid rgba(75,85,99,0.4)' : player.isActive ? `2px solid ${color}cc` : `2px solid ${color}55`,
+              background: player.eliminated ? 'rgba(17,17,17,0.6)' : player.isActive ? `${color}18` : `${color}0e`,
+              boxShadow: player.eliminated ? 'none' : player.isActive ? `0 0 50px ${color}28, inset 0 0 30px ${color}08` : `inset 0 0 20px ${color}06`,
+              opacity: player.eliminated ? 0.45 : 1,
+              transition: 'opacity 0.4s, border-color 0.4s',
             }}>
               <ZoneHeader player={player} color={color} />
+
+              {/* Eliminated overlay */}
+              {player.eliminated && (
+                <div style={{ position: 'absolute', inset: 0, zIndex: 10, borderRadius: 14,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                  <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: 3,
+                    color: 'rgba(255,255,255,0.18)', textTransform: 'uppercase' }}>Eliminated</span>
+                </div>
+              )}
 
               {/* Card rows */}
               {rows.map(row => (
@@ -1352,8 +1398,12 @@ export default function GameBoardPage() {
       socket.emit('game:update_counter', { instanceId, counter, delta }),
     setPt:          (instanceId: string, power: string, toughness: string) =>
       socket.emit('game:set_pt', { instanceId, power, toughness }),
-    giveControl:    (instanceId: string, targetSocketId: string) =>
+    giveControl:         (instanceId: string, targetSocketId: string) =>
       socket.emit('game:give_control', { instanceId, targetSocketId }),
+    confirmElimination:  (targetSocketId: string) =>
+      socket.emit('game:confirm_elimination', { targetSocketId }),
+    cancelElimination:   () =>
+      socket.emit('game:cancel_elimination'),
   };
 
   // ── Timing helper ─────────────────────────────────────────────────────────────
@@ -1572,8 +1622,14 @@ export default function GameBoardPage() {
         {/* Player name */}
         <div className="flex items-center gap-2 shrink-0"
           style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 12 }}>
-          {isMyTurn && <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: '#facc15', boxShadow: '0 0 6px #facc15' }} />}
-          <span className="text-sm font-bold" style={{ color: '#f9fafb' }}>{me.playerName}</span>
+          {isMyTurn && !me.eliminated && <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: '#facc15', boxShadow: '0 0 6px #facc15' }} />}
+          <span className="text-sm font-bold" style={{ color: me.eliminated ? '#6b7280' : '#f9fafb' }}>{me.playerName}</span>
+          {me.eliminated && (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md"
+              style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171' }}>
+              ELIMINATED
+            </span>
+          )}
         </div>
       </div>
 
@@ -1724,6 +1780,15 @@ export default function GameBoardPage() {
           onCreate={(name, power, toughness, color, typeLine) =>
             emit.createToken(name, power, toughness, color, typeLine)
           }
+        />
+      )}
+
+      {/* ── Death confirmation popup ── */}
+      {gameState.pendingElimination && (
+        <DeathConfirmationPopup
+          pending={gameState.pendingElimination}
+          onConfirm={() => emit.confirmElimination(gameState.pendingElimination!.socketId)}
+          onCancel={() => emit.cancelElimination()}
         />
       )}
 
