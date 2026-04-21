@@ -110,6 +110,7 @@ export interface ServerToClientEvents {
   'game:state': (state: PersonalGameState) => void;
   'game:error': (message: string) => void;
   'game:library_contents': (cards: GameCard[]) => void;
+  'game:scry_cards': (cards: GameCard[]) => void;
   'player:joined': (player: Player) => void;
   'player:left': (playerId: string) => void;
   'chat:message': (payload: ChatMessage) => void;
@@ -146,6 +147,8 @@ export interface ClientToServerEvents {
   'game:give_control': (payload: { instanceId: string; targetSocketId: string }) => void;
   'game:confirm_elimination': (payload: { targetSocketId: string }) => void;
   'game:cancel_elimination': () => void;
+  'game:scry': (payload: { count: number }) => void;
+  'game:scry_resolve': (payload: { keepOnTop: string[]; putOnBottom: string[] }) => void;
   'game:join': (payload: { gameId: string; playerName: string }) => void;
   'player:update_life': (payload: { delta: number }) => void;
   'chat:send': (message: string) => void;

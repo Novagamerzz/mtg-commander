@@ -685,6 +685,31 @@ io.on('connection', (socket) => {
     broadcastGame(game);
   });
 
+  socket.on('game:scry', ({ count }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    const n = Math.min(Math.max(1, Math.floor(count)), player.library.length);
+    if (n === 0) return;
+    socket.emit('game:scry_cards', player.library.slice(0, n) as GameCard[]);
+    appendLog(game, `${player.playerName} scryed ${n}`);
+    broadcastGame(game);
+  });
+
+  socket.on('game:scry_resolve', ({ keepOnTop, putOnBottom }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    const scryCount = keepOnTop.length + putOnBottom.length;
+    const scryed = player.library.splice(0, scryCount);
+    const top = keepOnTop.map((id) => scryed.find((c) => c.instanceId === id)).filter(Boolean) as typeof scryed;
+    const bot = putOnBottom.map((id) => scryed.find((c) => c.instanceId === id)).filter(Boolean) as typeof scryed;
+    player.library = [...top, ...player.library, ...bot];
+    broadcastGame(game);
+  });
+
   socket.on('game:create_token', ({ name, power, toughness, color, typeLine, imageUri }) => {
     const game = getGame(socket.id);
     if (!game) return;

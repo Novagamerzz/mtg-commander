@@ -163,6 +163,147 @@ function DeathConfirmationPopup({ pending, onConfirm, onCancel }: {
   );
 }
 
+function ScryInputPopup({ maxCount, onConfirm, onClose }: {
+  maxCount: number; onConfirm: (n: number) => void; onClose: () => void;
+}) {
+  const [n, setN] = useState(1);
+  return (
+    <div className="fixed inset-0 z-[85] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(6px)' }}
+      onMouseDown={onClose}>
+      <div className="rounded-2xl p-6 flex flex-col gap-4 items-center"
+        style={{ background: '#0f172a', border: '1px solid #334155',
+          boxShadow: '0 32px 64px rgba(0,0,0,0.95)', width: 280 }}
+        onMouseDown={(e) => e.stopPropagation()}>
+        <p className="text-base font-bold" style={{ color: '#e2e8f0' }}>Scry how many?</p>
+        <input type="number" min={1} max={Math.min(10, maxCount)} value={n}
+          onChange={(e) => setN(Math.min(10, Math.max(1, parseInt(e.target.value) || 1)))}
+          className="text-center text-2xl font-black rounded-xl focus:outline-none w-24"
+          style={{ background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9', padding: '8px 0' }} />
+        <p className="text-xs" style={{ color: '#475569' }}>1 – {Math.min(10, maxCount)} cards</p>
+        <div className="flex gap-3 w-full">
+          <button onClick={() => onConfirm(n)}
+            className="flex-1 py-2.5 rounded-xl font-bold text-sm transition hover:brightness-110"
+            style={{ background: 'linear-gradient(135deg, #0369a1, #075985)', color: '#7dd3fc',
+              border: '1px solid rgba(125,211,252,0.3)', cursor: 'pointer' }}>
+            Scry {n}
+          </button>
+          <button onClick={onClose}
+            className="px-4 py-2.5 rounded-xl text-sm"
+            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+              color: '#6b7280', cursor: 'pointer' }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScryModal({ cards, onResolve, onClose }: {
+  cards: GameCard[];
+  onResolve: (keepOnTop: string[], putOnBottom: string[]) => void;
+  onClose: () => void;
+}) {
+  const [decisions, setDecisions] = useState<Record<string, 'top' | 'bottom'>>(() => {
+    const d: Record<string, 'top' | 'bottom'> = {};
+    cards.forEach((c) => { d[c.instanceId] = 'top'; });
+    return d;
+  });
+
+  function toggle(id: string) {
+    setDecisions((prev) => ({ ...prev, [id]: prev[id] === 'top' ? 'bottom' : 'top' }));
+  }
+
+  function handleDone() {
+    const keepOnTop = cards.filter((c) => decisions[c.instanceId] === 'top').map((c) => c.instanceId);
+    const putOnBottom = cards.filter((c) => decisions[c.instanceId] === 'bottom').map((c) => c.instanceId);
+    onResolve(keepOnTop, putOnBottom);
+  }
+
+  const topCount = Object.values(decisions).filter((v) => v === 'top').length;
+
+  return (
+    <div className="fixed inset-0 z-[85] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}>
+      <div className="rounded-2xl flex flex-col"
+        style={{ background: '#0f172a', border: '1px solid #334155',
+          boxShadow: '0 32px 64px rgba(0,0,0,0.95)', maxWidth: '92vw', maxHeight: '88vh' }}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px',
+          borderBottom: '1px solid #1e293b' }}>
+          <div style={{ flex: 1 }}>
+            <p className="font-bold" style={{ color: '#7dd3fc', fontSize: 16 }}>
+              Scry {cards.length}
+            </p>
+            <p style={{ fontSize: 11, color: '#475569', marginTop: 2 }}>
+              {topCount} on top · {cards.length - topCount} on bottom
+            </p>
+          </div>
+          <button onClick={onClose}
+            style={{ width: 30, height: 30, borderRadius: 8, background: '#1e293b',
+              border: '1px solid #334155', color: '#94a3b8', fontSize: 16,
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+        </div>
+
+        {/* Cards */}
+        <div style={{ display: 'flex', gap: 12, padding: '16px 18px', overflowX: 'auto', flexWrap: 'nowrap' }}>
+          {cards.map((card) => {
+            const isTop = decisions[card.instanceId] === 'top';
+            return (
+              <div key={card.instanceId} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
+                gap: 8, flexShrink: 0, width: 100 }}>
+                <div style={{ width: 100, height: 140, borderRadius: 8, overflow: 'hidden',
+                  border: isTop ? '2px solid rgba(125,211,252,0.6)' : '2px solid rgba(148,163,184,0.25)',
+                  boxShadow: isTop ? '0 0 12px rgba(125,211,252,0.3)' : 'none',
+                  opacity: isTop ? 1 : 0.55, transition: 'all 0.15s' }}>
+                  {card.imageUri
+                    ? <img src={card.imageUri} alt={card.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    : <div style={{ width: '100%', height: '100%', background: '#1e293b',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ fontSize: 9, color: '#6b7280', textAlign: 'center', padding: 4 }}>{card.name}</span>
+                      </div>}
+                </div>
+                <p style={{ fontSize: 9, color: '#94a3b8', textAlign: 'center', lineHeight: 1.3,
+                  maxWidth: 96, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {card.name}
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%' }}>
+                  <button onClick={() => setDecisions((prev) => ({ ...prev, [card.instanceId]: 'top' }))}
+                    style={{ padding: '4px 0', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                      background: isTop ? 'rgba(125,211,252,0.2)' : 'rgba(255,255,255,0.04)',
+                      border: isTop ? '1px solid rgba(125,211,252,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                      color: isTop ? '#7dd3fc' : '#4b5563' }}>
+                    ▲ Keep on top
+                  </button>
+                  <button onClick={() => setDecisions((prev) => ({ ...prev, [card.instanceId]: 'bottom' }))}
+                    style={{ padding: '4px 0', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                      background: !isTop ? 'rgba(148,163,184,0.15)' : 'rgba(255,255,255,0.04)',
+                      border: !isTop ? '1px solid rgba(148,163,184,0.4)' : '1px solid rgba(255,255,255,0.1)',
+                      color: !isTop ? '#94a3b8' : '#4b5563' }}>
+                    ▼ Put on bottom
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '12px 18px', borderTop: '1px solid #1e293b', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button onClick={handleDone}
+            className="px-6 py-2.5 rounded-xl font-bold text-sm transition hover:brightness-110"
+            style={{ background: 'linear-gradient(135deg, #0369a1, #075985)', color: '#7dd3fc',
+              border: '1px solid rgba(125,211,252,0.3)', cursor: 'pointer' }}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Battlefield row organisation ──────────────────────────────────────────────
 
 const TYPE_ROWS: { label: string; match: (t: string) => boolean; isLand?: boolean }[] = [
@@ -174,10 +315,16 @@ const TYPE_ROWS: { label: string; match: (t: string) => boolean; isLand?: boolea
   { label: 'Other',         match: (_) => true },
 ];
 
-function groupByType(cards: GameCard[]): { label: string; cards: GameCard[]; isLand: boolean }[] {
+// Opponent board uses reversed row order so creatures face each other across the table
+const TYPE_ROWS_OPP = [...TYPE_ROWS].reverse();
+
+function groupByType(
+  cards: GameCard[],
+  rowDefs: typeof TYPE_ROWS = TYPE_ROWS,
+): { label: string; cards: GameCard[]; isLand: boolean }[] {
   const assigned = new Set<string>();
   const rows: { label: string; cards: GameCard[]; isLand: boolean }[] = [];
-  for (const { label, match, isLand = false } of TYPE_ROWS) {
+  for (const { label, match, isLand = false } of rowDefs) {
     const rowCards = cards.filter((c) => !assigned.has(c.instanceId) && match(c.typeLine));
     rowCards.forEach((c) => assigned.add(c.instanceId));
     if (rowCards.length > 0) rows.push({ label, cards: rowCards, isLand });
@@ -545,10 +692,10 @@ interface CRow {
   slots: { id: string; x: number }[];
 }
 
-function buildCRows(cards: GameCard[]): CRow[] {
+function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS): CRow[] {
   const out: CRow[] = [];
   let ry = 0;
-  for (const { label, cards: rc, isLand } of groupByType(cards)) {
+  for (const { label, cards: rc, isLand } of groupByType(cards, rowDefs)) {
     const { cW, cH } = cardSizeForRow(rc.length, isLand);
     out.push({
       label, isLand, y: ry, cW, cH,
@@ -835,7 +982,7 @@ function TableCanvas({
           const zone = layout.ops[i];
           if (!zone) return null;
           const color = ZONE_COLORS[(i + 1) % ZONE_COLORS.length];
-          const rows = buildCRows(player.battlefield);
+          const rows = buildCRows(player.battlefield, TYPE_ROWS_OPP);
           const cardMap = new Map<string, GameCard>(player.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
           return (
@@ -1273,6 +1420,8 @@ export default function GameBoardPage() {
   const [zoneModal, setZoneModal] = useState<'graveyard' | 'exile' | 'library' | null>(null);
   const [libraryCards, setLibraryCards] = useState<GameCard[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
+  const [scryInputOpen, setScryInputOpen] = useState(false);
+  const [scryCards, setScryCards] = useState<GameCard[] | null>(null);
 
   const [timingToast, setTimingToast] = useState<string | null>(null);
   const [overHand, setOverHand] = useState(false);
@@ -1289,6 +1438,7 @@ export default function GameBoardPage() {
     if (!socket.connected) socket.connect();
     socket.on('game:state', setGameState);
     socket.on('game:library_contents', (cards) => { setLibraryCards(cards); setLibraryLoading(false); });
+    socket.on('game:scry_cards', (cards) => { setScryCards(cards); setScryInputOpen(false); });
     socket.on('game:error', (msg) => {
       setTimingToast(msg);
       if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1303,6 +1453,7 @@ export default function GameBoardPage() {
     return () => {
       socket.off('game:state', setGameState);
       socket.off('game:library_contents');
+      socket.off('game:scry_cards');
       socket.off('game:error');
       socket.off('game:announcement');
       if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1404,6 +1555,10 @@ export default function GameBoardPage() {
       socket.emit('game:confirm_elimination', { targetSocketId }),
     cancelElimination:   () =>
       socket.emit('game:cancel_elimination'),
+    scry:                (count: number) =>
+      socket.emit('game:scry', { count }),
+    scryResolve:         (keepOnTop: string[], putOnBottom: string[]) =>
+      socket.emit('game:scry_resolve', { keepOnTop, putOnBottom }),
   };
 
   // ── Timing helper ─────────────────────────────────────────────────────────────
@@ -1596,6 +1751,11 @@ export default function GameBoardPage() {
           <button onClick={openLibraryModal} title="Search library"
             className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
             style={{ color: '#94a3b8' }}>📚 {me.libraryCount}</button>
+          <button onClick={() => setScryInputOpen(true)} title="Scry"
+            className="text-xs font-bold px-2 py-1 rounded-lg transition hover:bg-white/10"
+            style={{ color: '#7dd3fc', border: '1px solid rgba(125,211,252,0.2)' }}>
+            Scry
+          </button>
           <span style={{ color: '#94a3b8' }}>✋ {me.handCount}</span>
           <button onClick={() => setZoneModal('graveyard')} title="View graveyard"
             className="flex items-center gap-1 px-2 py-1 rounded-lg transition hover:bg-white/10"
@@ -1780,6 +1940,24 @@ export default function GameBoardPage() {
           onCreate={(name, power, toughness, color, typeLine) =>
             emit.createToken(name, power, toughness, color, typeLine)
           }
+        />
+      )}
+
+      {/* ── Scry input ── */}
+      {scryInputOpen && (
+        <ScryInputPopup
+          maxCount={me.libraryCount}
+          onConfirm={(n) => emit.scry(n)}
+          onClose={() => setScryInputOpen(false)}
+        />
+      )}
+
+      {/* ── Scry modal ── */}
+      {scryCards && (
+        <ScryModal
+          cards={scryCards}
+          onResolve={(keep, bot) => { emit.scryResolve(keep, bot); setScryCards(null); }}
+          onClose={() => setScryCards(null)}
         />
       )}
 
