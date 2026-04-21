@@ -275,30 +275,34 @@ function CounterBadge({ type, count }: { type: string; count: number }) {
 // ── My battlefield card ───────────────────────────────────────────────────────
 
 function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommander, onReturnHand,
-  onDragStart, onHover, onHoverEnd, onUpdateCounter, onSetPt, cardW = 140, cardH = 196,
+  onGiveControl, opponents, onDragStart, onHover, onHoverEnd, onUpdateCounter, onSetPt,
+  cardW = 140, cardH = 196,
 }: {
   card: GameCard; onTap: () => void; onGraveyard: () => void; onExile: () => void;
-  onReturnCommander: () => void; onReturnHand: () => void; onDragStart: (e: React.DragEvent) => void;
+  onReturnCommander: () => void; onReturnHand: () => void;
+  onGiveControl: (targetSocketId: string) => void;
+  opponents: { socketId: string; playerName: string }[];
+  onDragStart: (e: React.DragEvent) => void;
   onHover: (c: GameCard) => void; onHoverEnd: () => void;
   onUpdateCounter: (counter: string, delta: number) => void;
   onSetPt: (power: string, toughness: string) => void;
   cardW?: number; cardH?: number;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuMode, setMenuMode] = useState<null | 'main' | 'giveControl'>(null);
 
   useEffect(() => {
-    if (!menuOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
+    if (!menuMode) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuMode(null); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [menuOpen]);
+  }, [menuMode]);
 
   const counters = card.counters ?? {};
   const hasCounters = Object.values(counters).some((n) => n > 0);
   const hasPtOverride = card.powerOverride != null || card.toughnessOverride != null;
 
-  function openMenu() { setMenuOpen(true); onHoverEnd(); }
-  function closeMenu() { setMenuOpen(false); }
+  function openMenu() { setMenuMode('main'); onHoverEnd(); }
+  function closeMenu() { setMenuMode(null); }
 
   return (
     <TappedCardWrapper card={card} cardW={cardW} cardH={cardH} className="group">
@@ -307,7 +311,7 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
         onDragStart={(e) => { onDragStart(e); closeMenu(); }}
         onClick={onTap}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openMenu(); }}
-        onMouseEnter={() => { if (!menuOpen) onHover(card); }} onMouseLeave={() => onHoverEnd()}
+        onMouseEnter={() => { if (!menuMode) onHover(card); }} onMouseLeave={() => onHoverEnd()}
         className="w-full h-full" style={{ cursor: card.tapped ? 'pointer' : 'grab' }}>
         {card.imageUri ? (
           <img src={card.imageUri} alt={card.name} className="w-full h-full object-cover rounded-lg"
@@ -351,7 +355,7 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
         onClick={(e) => { e.stopPropagation(); openMenu(); }}>⋮</button>
 
       {/* Card action modal — portaled to document.body */}
-      {menuOpen && ReactDOM.createPortal(
+      {menuMode !== null && ReactDOM.createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 9998,
           background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
           display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -365,9 +369,15 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', padding: '14px 12px 14px 18px',
               borderBottom: '1px solid #1e293b' }}>
+              {menuMode === 'giveControl' && (
+                <button onClick={() => setMenuMode('main')}
+                  style={{ marginRight: 8, width: 28, height: 28, borderRadius: 7, background: '#1e293b',
+                    border: '1px solid #334155', color: '#94a3b8', fontSize: 14,
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>←</button>
+              )}
               <span style={{ fontSize: 16, color: '#f1f5f9', fontWeight: 700, flex: 1,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {card.name.split(',')[0]}
+                {menuMode === 'giveControl' ? 'Give Control To…' : card.name.split(',')[0]}
               </span>
               <button onClick={closeMenu}
                 style={{ width: 30, height: 30, borderRadius: 8, background: '#1e293b',
@@ -375,63 +385,85 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
                   cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
             </div>
 
-            {/* Actions */}
-            <div style={{ padding: '6px 0', borderBottom: '1px solid #1e293b' }}>
-              {([
-                { label: card.tapped ? '↺ Untap' : '↻ Tap',  action: () => { onTap(); closeMenu(); },            color: '#f1f5f9' },
-                { label: '→ Send to Graveyard',                action: () => { onGraveyard(); closeMenu(); },       color: '#94a3b8' },
-                { label: '→ Send to Exile',                    action: () => { onExile(); closeMenu(); },           color: '#c4b5fd' },
-                { label: '↩ Return to Hand',                   action: () => { onReturnHand(); closeMenu(); },      color: '#86efac' },
-                ...(card.isCommander ? [{ label: '⚜ Return to Command Zone', action: () => { onReturnCommander(); closeMenu(); }, color: '#fbbf24' }] : []),
-              ] as { label: string; action: () => void; color: string }[]).map(({ label, action, color }) => (
-                <button key={label} onClick={action}
-                  style={{ display: 'block', width: '100%', textAlign: 'left',
-                    padding: '10px 18px', fontSize: 14, fontWeight: 500,
-                    color, background: 'none', border: 'none', cursor: 'pointer' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}>
-                  {label}
-                </button>
-              ))}
-            </div>
+            {menuMode === 'giveControl' ? (
+              /* Give Control player list */
+              <div style={{ padding: '6px 0' }}>
+                {opponents.length === 0 ? (
+                  <p style={{ padding: '12px 18px', fontSize: 13, color: '#64748b' }}>No other players in game.</p>
+                ) : opponents.map((opp) => (
+                  <button key={opp.socketId}
+                    onClick={() => { onGiveControl(opp.socketId); closeMenu(); }}
+                    style={{ display: 'block', width: '100%', textAlign: 'left',
+                      padding: '10px 18px', fontSize: 14, fontWeight: 500,
+                      color: '#fbbf24', background: 'none', border: 'none', cursor: 'pointer' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}>
+                    {opp.playerName}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <>
+                {/* Actions */}
+                <div style={{ padding: '6px 0', borderBottom: '1px solid #1e293b' }}>
+                  {([
+                    { label: card.tapped ? '↺ Untap' : '↻ Tap',  action: () => { onTap(); closeMenu(); },            color: '#f1f5f9' },
+                    { label: '→ Send to Graveyard',                action: () => { onGraveyard(); closeMenu(); },       color: '#94a3b8' },
+                    { label: '→ Send to Exile',                    action: () => { onExile(); closeMenu(); },           color: '#c4b5fd' },
+                    { label: '↩ Return to Hand',                   action: () => { onReturnHand(); closeMenu(); },      color: '#86efac' },
+                    ...(card.isCommander ? [{ label: '⚜ Return to Command Zone', action: () => { onReturnCommander(); closeMenu(); }, color: '#fbbf24' }] : []),
+                    ...(opponents.length > 0 ? [{ label: '↗ Give Control →', action: () => setMenuMode('giveControl'), color: '#fb923c' }] : []),
+                  ] as { label: string; action: () => void; color: string }[]).map(({ label, action, color }) => (
+                    <button key={label} onClick={action}
+                      style={{ display: 'block', width: '100%', textAlign: 'left',
+                        padding: '10px 18px', fontSize: 14, fontWeight: 500,
+                        color, background: 'none', border: 'none', cursor: 'pointer' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
 
-            {/* Counters */}
-            <div style={{ padding: '6px 0' }}>
-              <p style={{ fontSize: 11, color: '#64748b', padding: '6px 18px 6px',
-                fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>Counters</p>
-              {COUNTER_TYPES.map((type) => {
-                const m = COUNTER_META[type];
-                const n = counters[type] ?? 0;
-                const btnStyle: React.CSSProperties = {
-                  width: 28, height: 28, borderRadius: 7, background: '#1e293b',
-                  border: '1px solid #334155', color: '#cbd5e1', fontSize: 18,
-                  lineHeight: 1, cursor: 'pointer', flexShrink: 0, display: 'flex',
-                  alignItems: 'center', justifyContent: 'center',
-                };
-                return (
-                  <div key={type} style={{ display: 'flex', alignItems: 'center',
-                    padding: '5px 12px 5px 18px', gap: 10 }}>
-                    <span style={{ fontSize: 14, color: m.color, fontWeight: 700, flex: 1 }}>
-                      {m.label}
-                    </span>
-                    <button onClick={() => onUpdateCounter(type, -1)} style={btnStyle}>−</button>
-                    <span style={{ fontSize: 15, fontWeight: 800,
-                      color: n > 0 ? m.color : '#475569', minWidth: 26, textAlign: 'center' }}>{n}</span>
-                    <button onClick={() => onUpdateCounter(type, 1)} style={btnStyle}>+</button>
-                  </div>
-                );
-              })}
-              {hasCounters && (
-                <button onClick={() => { Object.keys(counters).forEach((t) => onUpdateCounter(t, -(counters[t] ?? 0))); }}
-                  style={{ display: 'block', width: '100%', textAlign: 'left',
-                    padding: '8px 18px', fontSize: 13, color: '#f87171',
-                    background: 'none', border: 'none', cursor: 'pointer', marginTop: 2 }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}>
-                  × Clear all counters
-                </button>
-              )}
-            </div>
+                {/* Counters */}
+                <div style={{ padding: '6px 0' }}>
+                  <p style={{ fontSize: 11, color: '#64748b', padding: '6px 18px 6px',
+                    fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>Counters</p>
+                  {COUNTER_TYPES.map((type) => {
+                    const m = COUNTER_META[type];
+                    const n = counters[type] ?? 0;
+                    const btnStyle: React.CSSProperties = {
+                      width: 28, height: 28, borderRadius: 7, background: '#1e293b',
+                      border: '1px solid #334155', color: '#cbd5e1', fontSize: 18,
+                      lineHeight: 1, cursor: 'pointer', flexShrink: 0, display: 'flex',
+                      alignItems: 'center', justifyContent: 'center',
+                    };
+                    return (
+                      <div key={type} style={{ display: 'flex', alignItems: 'center',
+                        padding: '5px 12px 5px 18px', gap: 10 }}>
+                        <span style={{ fontSize: 14, color: m.color, fontWeight: 700, flex: 1 }}>
+                          {m.label}
+                        </span>
+                        <button onClick={() => onUpdateCounter(type, -1)} style={btnStyle}>−</button>
+                        <span style={{ fontSize: 15, fontWeight: 800,
+                          color: n > 0 ? m.color : '#475569', minWidth: 26, textAlign: 'center' }}>{n}</span>
+                        <button onClick={() => onUpdateCounter(type, 1)} style={btnStyle}>+</button>
+                      </div>
+                    );
+                  })}
+                  {hasCounters && (
+                    <button onClick={() => { Object.keys(counters).forEach((t) => onUpdateCounter(t, -(counters[t] ?? 0))); }}
+                      style={{ display: 'block', width: '100%', textAlign: 'left',
+                        padding: '8px 18px', fontSize: 13, color: '#f87171',
+                        background: 'none', border: 'none', cursor: 'pointer', marginTop: 2 }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}>
+                      × Clear all counters
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>,
         document.body
@@ -665,6 +697,7 @@ interface TableCanvasProps {
   onExileCard: (id: string) => void;
   onReturnCmdCard: (id: string) => void;
   onReturnHandCard: (id: string) => void;
+  onGiveControl: (instanceId: string, targetSocketId: string) => void;
   onDragStartCard: (e: React.DragEvent, id: string) => void;
   onPlayCard: (id: string) => void;
   onHover: (c: GameCard) => void;
@@ -682,7 +715,7 @@ interface TableCanvasProps {
 
 function TableCanvas({
   me, opponents,
-  onTapCard, onGraveyardCard, onExileCard, onReturnCmdCard, onReturnHandCard, onDragStartCard,
+  onTapCard, onGraveyardCard, onExileCard, onReturnCmdCard, onReturnHandCard, onGiveControl, onDragStartCard,
   onPlayCard, onHover, onHoverEnd, onBfCardHover, onUpdateCounter, onSetPt,
   onDropToGy, onDropToEx, onOpenGy, onOpenEx, gyCards, exCards,
 }: TableCanvasProps) {
@@ -917,6 +950,8 @@ function TableCanvas({
                       onExile={() => onExileCard(card.instanceId)}
                       onReturnCommander={() => onReturnCmdCard(card.instanceId)}
                       onReturnHand={() => onReturnHandCard(card.instanceId)}
+                      onGiveControl={(targetSocketId) => onGiveControl(card.instanceId, targetSocketId)}
+                      opponents={opponents.map((o) => ({ socketId: o.socketId, playerName: o.playerName }))}
                       onDragStart={e => onDragStartCard(e, card.instanceId)}
                       onHover={(c) => { onBfCardHover(c.instanceId); onHover(c); }}
                       onHoverEnd={() => { onBfCardHover(null); onHoverEnd(); }}
@@ -1194,6 +1229,7 @@ export default function GameBoardPage() {
   const [libraryLoading, setLibraryLoading] = useState(false);
 
   const [timingToast, setTimingToast] = useState<string | null>(null);
+  const [overHand, setOverHand] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [announcement, setAnnouncement] = useState<string | null>(null);
   const announcementTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1316,6 +1352,8 @@ export default function GameBoardPage() {
       socket.emit('game:update_counter', { instanceId, counter, delta }),
     setPt:          (instanceId: string, power: string, toughness: string) =>
       socket.emit('game:set_pt', { instanceId, power, toughness }),
+    giveControl:    (instanceId: string, targetSocketId: string) =>
+      socket.emit('game:give_control', { instanceId, targetSocketId }),
   };
 
   // ── Timing helper ─────────────────────────────────────────────────────────────
@@ -1419,6 +1457,7 @@ export default function GameBoardPage() {
           onExileCard={interceptExile}
           onReturnCmdCard={emit.returnCmd}
           onReturnHandCard={emit.toHand}
+          onGiveControl={emit.giveControl}
           onDragStartCard={(e, id) => dragStart(e, id, 'battlefield')}
           onPlayCard={emit.playCard}
           onHover={setHoverCard}
@@ -1540,7 +1579,27 @@ export default function GameBoardPage() {
 
       {/* ── My hand (pinned at bottom) ── */}
       <div className="shrink-0 flex items-end gap-2 px-5 pb-3 pt-1 overflow-x-auto"
-        style={{ height: 148, borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.3)' }}>
+        style={{
+          height: 148,
+          borderTop: overHand ? '2px solid rgba(134,239,172,0.7)' : '1px solid rgba(255,255,255,0.06)',
+          background: overHand ? 'rgba(134,239,172,0.06)' : 'rgba(0,0,0,0.3)',
+          boxShadow: overHand ? 'inset 0 0 24px rgba(134,239,172,0.08)' : 'none',
+          transition: 'border-color 0.12s, background 0.12s',
+        }}
+        onDragOver={(e) => {
+          try {
+            const raw = e.dataTransfer.types.includes('application/json');
+            if (raw) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOverHand(true); }
+          } catch { /* */ }
+        }}
+        onDragLeave={() => setOverHand(false)}
+        onDrop={(e) => {
+          e.preventDefault(); setOverHand(false);
+          try {
+            const d: DragData = JSON.parse(e.dataTransfer.getData('application/json'));
+            if (d.source === 'battlefield') emit.toHand(d.instanceId);
+          } catch { /* */ }
+        }}>
         {me.hand.length === 0 ? (
           <p className="text-xs italic self-center w-full text-center" style={{ color: 'rgba(255,255,255,0.08)' }}>
             Hand empty — click Draw to draw a card

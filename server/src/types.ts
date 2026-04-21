@@ -141,6 +141,7 @@ export interface ClientToServerEvents {
   'game:shuffle_library': () => void;
   'game:update_counter': (payload: { instanceId: string; counter: string; delta: number }) => void;
   'game:set_pt': (payload: { instanceId: string; power: string; toughness: string }) => void;
+  'game:give_control': (payload: { instanceId: string; targetSocketId: string }) => void;
   'game:join': (payload: { gameId: string; playerName: string }) => void;
   'player:update_life': (payload: { delta: number }) => void;
   'chat:send': (message: string) => void;

@@ -723,6 +723,19 @@ io.on('connection', (socket) => {
     broadcastGame(game);
   });
 
+  socket.on('game:give_control', ({ instanceId, targetSocketId }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const fromPlayer = game.players.find((p) => p.socketId === socket.id);
+    const toPlayer   = game.players.find((p) => p.socketId === targetSocketId);
+    if (!fromPlayer || !toPlayer) return;
+    const card = moveCard(fromPlayer.battlefield, toPlayer.battlefield, instanceId);
+    if (card) {
+      appendLog(game, `${fromPlayer.playerName} gave ${card.name} to ${toPlayer.playerName}`);
+      broadcastGame(game);
+    }
+  });
+
   // ─── Disconnect ───────────────────────────────────────────────────────────────
 
   socket.on('disconnect', () => {
