@@ -771,7 +771,7 @@ io.on('connection', (socket) => {
     broadcastGame(game);
   });
 
-  socket.on('game:create_token', ({ name, power, toughness, color, typeLine, imageUri }) => {
+  socket.on('game:create_token', ({ name, power, toughness, color, typeLine, imageUri, oracleText }) => {
     const game = getGame(socket.id);
     if (!game) return;
     const player = game.players.find((p) => p.socketId === socket.id);
@@ -782,11 +782,12 @@ io.on('connection', (socket) => {
       name,
       imageUri: imageUri ?? '',
       typeLine,
-      oracleText: power && toughness ? `${power}/${toughness}` : '',
+      oracleText: oracleText || (power && toughness ? `${power}/${toughness}` : ''),
       tapped: false,
     };
     player.battlefield.push(token);
-    appendLog(game, `${player.playerName} created ${name} token (${power}/${toughness})`);
+    const ptStr = power && toughness ? ` (${power}/${toughness})` : '';
+    appendLog(game, `${player.playerName} created ${name} token${ptStr}`);
     broadcastGame(game);
   });
 

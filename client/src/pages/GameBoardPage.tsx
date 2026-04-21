@@ -1561,7 +1561,20 @@ function CmdDamageMatrix({ players, mySocketId, onUpdate }: {
 
 // ── Token creation ────────────────────────────────────────────────────────────
 
-function makeTokenImageUri(name: string, pt: string, color: string): string {
+function wrapSvgText(text: string, maxChars: number): string[] {
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let cur = '';
+  for (const w of words) {
+    const next = cur ? `${cur} ${w}` : w;
+    if (next.length <= maxChars) { cur = next; }
+    else { if (cur) lines.push(cur); cur = w; }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+function makeTokenImageUri(name: string, pt: string, color: string, oracleText = ''): string {
   const bg: Record<string, string> = {
     white: '#cfc08a', blue: '#1c3d6b', black: '#1a1228', red: '#6b1c1c', green: '#1c4a2a', colorless: '#3a3a4a',
   };
@@ -1570,8 +1583,19 @@ function makeTokenImageUri(name: string, pt: string, color: string): string {
   };
   const bgC = bg[color] ?? bg.colorless;
   const bdC = bd[color] ?? bd.colorless;
-  const n = name.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="280" viewBox="0 0 200 280"><rect width="200" height="280" rx="10" fill="${bgC}" stroke="${bdC}" stroke-width="3"/><rect x="8" y="8" width="184" height="264" rx="7" fill="none" stroke="${bdC}" stroke-width="1" opacity="0.5"/><text x="100" y="108" font-family="Georgia,serif" font-size="13" fill="white" text-anchor="middle" font-weight="bold">${n}</text><rect x="55" y="168" width="90" height="38" rx="6" fill="rgba(0,0,0,0.45)" stroke="${bdC}" stroke-width="1"/><text x="100" y="194" font-family="Georgia,serif" font-size="22" fill="white" text-anchor="middle" font-weight="bold">${pt}</text><text x="100" y="240" font-family="Georgia,serif" font-size="9" fill="rgba(255,255,255,0.35)" text-anchor="middle">TOKEN</text></svg>`;
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const n = esc(name);
+  const hasNoPt = !pt || pt === '/';
+  let body = '';
+  if (hasNoPt && oracleText) {
+    const lines = wrapSvgText(oracleText, 26).slice(0, 9);
+    body = lines.map((l, i) =>
+      `<text x="100" y="${132 + i * 13}" font-family="Georgia,serif" font-size="8" fill="rgba(255,255,255,0.82)" text-anchor="middle">${esc(l)}</text>`
+    ).join('');
+  } else if (!hasNoPt) {
+    body = `<rect x="55" y="168" width="90" height="38" rx="6" fill="rgba(0,0,0,0.45)" stroke="${bdC}" stroke-width="1"/><text x="100" y="194" font-family="Georgia,serif" font-size="22" fill="white" text-anchor="middle" font-weight="bold">${esc(pt)}</text>`;
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="280" viewBox="0 0 200 280"><rect width="200" height="280" rx="10" fill="${bgC}" stroke="${bdC}" stroke-width="3"/><rect x="8" y="8" width="184" height="264" rx="7" fill="none" stroke="${bdC}" stroke-width="1" opacity="0.5"/><text x="100" y="108" font-family="Georgia,serif" font-size="13" fill="white" text-anchor="middle" font-weight="bold">${n}</text>${body}<text x="100" y="262" font-family="Georgia,serif" font-size="9" fill="rgba(255,255,255,0.35)" text-anchor="middle">TOKEN</text></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
@@ -1582,64 +1606,84 @@ const TOKEN_COLOR_SWATCHES: Record<TokenColor, string> = {
   white: '#cfc08a', blue: '#4a7eb5', black: '#7a4ab4', red: '#c44a4a', green: '#4a9a5a', colorless: '#7a7a8a',
 };
 
-const TOKEN_PRESETS: { name: string; power: string; toughness: string; color: TokenColor; typeLine: string }[] = [
-  // ── Green
-  { name: 'Saproling',  power: '1', toughness: '1', color: 'green',     typeLine: 'Token Creature — Saproling' },
-  { name: 'Elf',        power: '1', toughness: '1', color: 'green',     typeLine: 'Token Creature — Elf' },
-  { name: 'Snake',      power: '1', toughness: '1', color: 'green',     typeLine: 'Token Creature — Snake' },
-  { name: 'Bear',       power: '2', toughness: '2', color: 'green',     typeLine: 'Token Creature — Bear' },
-  { name: 'Wolf',       power: '2', toughness: '2', color: 'green',     typeLine: 'Token Creature — Wolf' },
-  { name: 'Beast',      power: '3', toughness: '3', color: 'green',     typeLine: 'Token Creature — Beast' },
-  { name: 'Elephant',   power: '3', toughness: '3', color: 'green',     typeLine: 'Token Creature — Elephant' },
-  { name: 'Elemental',  power: '4', toughness: '4', color: 'green',     typeLine: 'Token Creature — Elemental' },
-  { name: 'Wurm',       power: '5', toughness: '5', color: 'green',     typeLine: 'Token Creature — Wurm' },
-  { name: 'Wurm',       power: '6', toughness: '6', color: 'green',     typeLine: 'Token Creature — Wurm' },
-  // ── White
-  { name: 'Human',      power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Human' },
-  { name: 'Cat',        power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Cat' },
-  { name: 'Soldier',    power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Soldier' },
-  { name: 'Spirit',     power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Spirit (Flying)' },
-  { name: 'Egg',        power: '0', toughness: '1', color: 'white',     typeLine: 'Token Creature — Egg' },
-  { name: 'Knight',     power: '2', toughness: '2', color: 'white',     typeLine: 'Token Creature — Knight (Vigilance)' },
-  { name: 'Angel',      power: '3', toughness: '3', color: 'white',     typeLine: 'Token Creature — Angel (Flying, Vigilance)' },
-  // ── Black
-  { name: 'Zombie',     power: '1', toughness: '1', color: 'black',     typeLine: 'Token Creature — Zombie' },
-  { name: 'Zombie',     power: '2', toughness: '2', color: 'black',     typeLine: 'Token Creature — Zombie' },
-  { name: 'Rat',        power: '1', toughness: '1', color: 'black',     typeLine: 'Token Creature — Rat' },
-  // ── Red
-  { name: 'Goblin',     power: '1', toughness: '1', color: 'red',       typeLine: 'Token Creature — Goblin' },
-  { name: 'Devil',      power: '1', toughness: '1', color: 'red',       typeLine: 'Token Creature — Devil' },
-  { name: 'Dragon',     power: '2', toughness: '2', color: 'red',       typeLine: 'Token Creature — Dragon (Flying)' },
-  { name: 'Dragon',     power: '4', toughness: '4', color: 'red',       typeLine: 'Token Creature — Dragon (Flying)' },
-  // ── Blue
-  { name: 'Bird',       power: '1', toughness: '1', color: 'blue',      typeLine: 'Token Creature — Bird (Flying)' },
-  { name: 'Drake',      power: '2', toughness: '2', color: 'blue',      typeLine: 'Token Creature — Drake (Flying)' },
-  // ── Colorless artifacts
-  { name: 'Thopter',    power: '1', toughness: '1', color: 'colorless', typeLine: 'Token Artifact Creature — Thopter (Flying)' },
-  { name: 'Treasure',   power: '0', toughness: '0', color: 'colorless', typeLine: 'Token Artifact — Treasure' },
-  { name: 'Food',       power: '0', toughness: '0', color: 'colorless', typeLine: 'Token Artifact — Food' },
-  { name: 'Clue',       power: '0', toughness: '0', color: 'colorless', typeLine: 'Token Artifact — Clue' },
-  { name: 'Gold',       power: '0', toughness: '0', color: 'colorless', typeLine: 'Token Artifact — Gold' },
-  { name: 'Blood',      power: '0', toughness: '0', color: 'colorless', typeLine: 'Token Artifact — Blood' },
+const TOKEN_PRESETS: { name: string; power: string; toughness: string; color: TokenColor; typeLine: string; oracleText?: string; kind: 'creature' | 'artifact' }[] = [
+  // ── Green creatures
+  { kind: 'creature', name: 'Saproling',  power: '1', toughness: '1', color: 'green',     typeLine: 'Token Creature — Saproling' },
+  { kind: 'creature', name: 'Elf',        power: '1', toughness: '1', color: 'green',     typeLine: 'Token Creature — Elf' },
+  { kind: 'creature', name: 'Snake',      power: '1', toughness: '1', color: 'green',     typeLine: 'Token Creature — Snake' },
+  { kind: 'creature', name: 'Bear',       power: '2', toughness: '2', color: 'green',     typeLine: 'Token Creature — Bear' },
+  { kind: 'creature', name: 'Wolf',       power: '2', toughness: '2', color: 'green',     typeLine: 'Token Creature — Wolf' },
+  { kind: 'creature', name: 'Beast',      power: '3', toughness: '3', color: 'green',     typeLine: 'Token Creature — Beast' },
+  { kind: 'creature', name: 'Elephant',   power: '3', toughness: '3', color: 'green',     typeLine: 'Token Creature — Elephant' },
+  { kind: 'creature', name: 'Elemental',  power: '4', toughness: '4', color: 'green',     typeLine: 'Token Creature — Elemental' },
+  { kind: 'creature', name: 'Wurm',       power: '5', toughness: '5', color: 'green',     typeLine: 'Token Creature — Wurm' },
+  { kind: 'creature', name: 'Wurm',       power: '6', toughness: '6', color: 'green',     typeLine: 'Token Creature — Wurm' },
+  // ── White creatures
+  { kind: 'creature', name: 'Human',      power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Human' },
+  { kind: 'creature', name: 'Cat',        power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Cat' },
+  { kind: 'creature', name: 'Soldier',    power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Soldier' },
+  { kind: 'creature', name: 'Spirit',     power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Spirit (Flying)' },
+  { kind: 'creature', name: 'Egg',        power: '0', toughness: '1', color: 'white',     typeLine: 'Token Creature — Egg' },
+  { kind: 'creature', name: 'Knight',     power: '2', toughness: '2', color: 'white',     typeLine: 'Token Creature — Knight (Vigilance)' },
+  { kind: 'creature', name: 'Angel',      power: '3', toughness: '3', color: 'white',     typeLine: 'Token Creature — Angel (Flying, Vigilance)' },
+  // ── Black creatures
+  { kind: 'creature', name: 'Zombie',     power: '1', toughness: '1', color: 'black',     typeLine: 'Token Creature — Zombie' },
+  { kind: 'creature', name: 'Zombie',     power: '2', toughness: '2', color: 'black',     typeLine: 'Token Creature — Zombie' },
+  { kind: 'creature', name: 'Rat',        power: '1', toughness: '1', color: 'black',     typeLine: 'Token Creature — Rat' },
+  // ── Red creatures
+  { kind: 'creature', name: 'Goblin',     power: '1', toughness: '1', color: 'red',       typeLine: 'Token Creature — Goblin' },
+  { kind: 'creature', name: 'Devil',      power: '1', toughness: '1', color: 'red',       typeLine: 'Token Creature — Devil' },
+  { kind: 'creature', name: 'Dragon',     power: '2', toughness: '2', color: 'red',       typeLine: 'Token Creature — Dragon (Flying)' },
+  { kind: 'creature', name: 'Dragon',     power: '4', toughness: '4', color: 'red',       typeLine: 'Token Creature — Dragon (Flying)' },
+  // ── Blue creatures
+  { kind: 'creature', name: 'Bird',       power: '1', toughness: '1', color: 'blue',      typeLine: 'Token Creature — Bird (Flying)' },
+  { kind: 'creature', name: 'Drake',      power: '2', toughness: '2', color: 'blue',      typeLine: 'Token Creature — Drake (Flying)' },
+  // ── Colorless artifact creatures
+  { kind: 'creature', name: 'Thopter',    power: '1', toughness: '1', color: 'colorless', typeLine: 'Token Artifact Creature — Thopter (Flying)' },
+  // ── Artifact tokens (no P/T)
+  { kind: 'artifact', name: 'Clue',     power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Clue',     oracleText: '2, Sacrifice this artifact: Draw a card.' },
+  { kind: 'artifact', name: 'Treasure', power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Treasure', oracleText: 'T, Sacrifice this artifact: Add one mana of any color.' },
+  { kind: 'artifact', name: 'Food',     power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Food',     oracleText: '2, T, Sacrifice this artifact: You gain 3 life.' },
+  { kind: 'artifact', name: 'Map',      power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Map',      oracleText: '1, T, Sacrifice this artifact: Scry 1.' },
+  { kind: 'artifact', name: 'Shard',    power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Shard',    oracleText: 'T, Sacrifice this artifact: Add one mana of any color. Spend this mana only to cast a colored spell or activate an ability.' },
+  { kind: 'artifact', name: 'Gold',     power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Gold',     oracleText: 'Sacrifice this artifact: Add one mana of any color.' },
+  { kind: 'artifact', name: 'Blood',    power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Blood',    oracleText: '1, T, Discard a card, Sacrifice this artifact: Draw a card.' },
 ];
 
 function TokenCreateModal({ onClose, onCreate }: {
   onClose: () => void;
-  onCreate: (name: string, power: string, toughness: string, color: TokenColor, typeLine: string) => void;
+  onCreate: (name: string, power: string, toughness: string, color: TokenColor, typeLine: string, oracleText: string) => void;
 }) {
   const [name, setName]           = useState('');
   const [power, setPower]         = useState('1');
   const [toughness, setToughness] = useState('1');
   const [color, setColor]         = useState<TokenColor>('green');
   const [typeLine, setTypeLine]   = useState('Token Creature');
+  const [oracleText, setOracleText] = useState('');
   const [qty, setQty]             = useState(1);
+
+  const creaturePresets = TOKEN_PRESETS.filter(p => p.kind === 'creature');
+  const artifactPresets = TOKEN_PRESETS.filter(p => p.kind === 'artifact');
+
+  function applyPreset(p: typeof TOKEN_PRESETS[0]) {
+    setName(p.name); setPower(p.power); setToughness(p.toughness);
+    setColor(p.color); setTypeLine(p.typeLine); setOracleText(p.oracleText ?? '');
+  }
+
+  const presetBtn = (p: typeof TOKEN_PRESETS[0], idx: number) => (
+    <button key={idx} onClick={() => applyPreset(p)}
+      className="text-xs px-2 py-1 rounded-lg transition hover:brightness-110"
+      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#d1d5db', whiteSpace: 'nowrap' }}>
+      {p.power !== '' ? `${p.power}/${p.toughness} ` : ''}{p.name}
+    </button>
+  );
 
   return (
     <div className="fixed inset-0 flex items-center justify-center px-4"
       style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(6px)', zIndex: 10000 }}
       onClick={onClose}>
       <div className="rounded-2xl p-5 flex flex-col gap-3 w-full overflow-y-auto"
-        style={{ maxWidth: 380, maxHeight: '90vh', background: '#0f172a',
+        style={{ maxWidth: 400, maxHeight: '92vh', background: '#0f172a',
           border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 40px 80px rgba(0,0,0,0.9)' }}
         onClick={(e) => e.stopPropagation()}>
 
@@ -1649,19 +1693,21 @@ function TokenCreateModal({ onClose, onCreate }: {
             style={{ color: '#6b7280' }}>×</button>
         </div>
 
+        {/* Creature Tokens */}
         <div className="flex flex-col gap-1.5">
-          <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>Presets</p>
-          <div className="overflow-y-auto" style={{ maxHeight: 160 }}>
+          <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>Creature Tokens</p>
+          <div className="overflow-y-auto" style={{ maxHeight: 110 }}>
             <div className="flex flex-wrap gap-1.5">
-              {TOKEN_PRESETS.map((p, idx) => (
-                <button key={idx}
-                  onClick={() => { setName(p.name); setPower(p.power); setToughness(p.toughness); setColor(p.color); setTypeLine(p.typeLine); }}
-                  className="text-xs px-2 py-1 rounded-lg transition hover:brightness-110"
-                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#d1d5db', whiteSpace: 'nowrap' }}>
-                  {p.power !== '0' || p.toughness !== '0' ? `${p.power}/${p.toughness} ` : ''}{p.name}
-                </button>
-              ))}
+              {creaturePresets.map(presetBtn)}
             </div>
+          </div>
+        </div>
+
+        {/* Artifact Tokens */}
+        <div className="flex flex-col gap-1.5">
+          <p className="text-[9px] font-bold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.3)' }}>Artifact Tokens</p>
+          <div className="flex flex-wrap gap-1.5">
+            {artifactPresets.map(presetBtn)}
           </div>
         </div>
 
@@ -1675,14 +1721,14 @@ function TokenCreateModal({ onClose, onCreate }: {
         <div className="flex items-end gap-2">
           <div className="flex flex-col gap-1 flex-1">
             <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Power</label>
-            <input value={power} onChange={(e) => setPower(e.target.value)} placeholder="1"
+            <input value={power} onChange={(e) => setPower(e.target.value)} placeholder="—"
               className="px-3 py-2 rounded-lg text-sm focus:outline-none text-center"
               style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#e5e7eb' }} />
           </div>
           <span className="pb-2 text-lg font-bold" style={{ color: '#4b5563' }}>/</span>
           <div className="flex flex-col gap-1 flex-1">
             <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Toughness</label>
-            <input value={toughness} onChange={(e) => setToughness(e.target.value)} placeholder="1"
+            <input value={toughness} onChange={(e) => setToughness(e.target.value)} placeholder="—"
               className="px-3 py-2 rounded-lg text-sm focus:outline-none text-center"
               style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#e5e7eb' }} />
           </div>
@@ -1693,10 +1739,12 @@ function TokenCreateModal({ onClose, onCreate }: {
           <div className="flex gap-2 items-center">
             {TOKEN_COLORS.map((c) => (
               <button key={c} onClick={() => setColor(c)} title={c}
-                className="rounded-full transition-transform hover:scale-110"
+                className="rounded-full transition-transform hover:scale-110 relative flex items-center justify-center shrink-0"
                 style={{ width: 28, height: 28, background: TOKEN_COLOR_SWATCHES[c],
                   border: color === c ? '2px solid white' : '2px solid transparent',
-                  boxShadow: color === c ? `0 0 8px ${TOKEN_COLOR_SWATCHES[c]}` : 'none' }} />
+                  boxShadow: color === c ? `0 0 8px ${TOKEN_COLOR_SWATCHES[c]}` : 'none' }}>
+                {c === 'colorless' && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)', lineHeight: 1, pointerEvents: 'none' }}>∅</span>}
+              </button>
             ))}
             <span className="text-xs ml-1 capitalize" style={{ color: '#6b7280' }}>{color}</span>
           </div>
@@ -1706,6 +1754,15 @@ function TokenCreateModal({ onClose, onCreate }: {
           <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Type Line</label>
           <input value={typeLine} onChange={(e) => setTypeLine(e.target.value)} placeholder="Token Creature — Saproling"
             className="px-3 py-2 rounded-lg text-sm focus:outline-none"
+            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#e5e7eb' }} />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Oracle Text <span style={{ color: 'rgba(255,255,255,0.2)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></label>
+          <textarea value={oracleText} onChange={(e) => setOracleText(e.target.value)}
+            placeholder="Ability text — shown on artifact tokens instead of P/T"
+            rows={2}
+            className="px-3 py-2 rounded-lg text-xs focus:outline-none resize-none"
             style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#e5e7eb' }} />
         </div>
 
@@ -1724,7 +1781,7 @@ function TokenCreateModal({ onClose, onCreate }: {
         </div>
 
         <button
-          onClick={() => { if (name.trim()) { for (let i = 0; i < qty; i++) onCreate(name.trim(), power, toughness, color, typeLine); onClose(); } }}
+          onClick={() => { if (name.trim()) { for (let i = 0; i < qty; i++) onCreate(name.trim(), power, toughness, color, typeLine, oracleText); onClose(); } }}
           disabled={!name.trim()}
           className="w-full py-3 rounded-xl font-bold text-sm transition hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
           style={{ background: 'linear-gradient(135deg, #166534, #14532d)',
@@ -1909,9 +1966,10 @@ export default function GameBoardPage() {
     returnCmd:    (id: string) => socket.emit('game:return_commander',      { instanceId: id }),
     castCommander: ()          => socket.emit('game:cast_commander'),
     tutor:        (id: string, to: 'hand' | 'battlefield') => socket.emit('game:tutor', { instanceId: id, to }),
-    createToken:  (name: string, power: string, toughness: string, color: string, typeLine: string) => {
-      const imageUri = makeTokenImageUri(name, `${power}/${toughness}`, color);
-      socket.emit('game:create_token', { name, power, toughness, color, typeLine, imageUri });
+    createToken:  (name: string, power: string, toughness: string, color: string, typeLine: string, oracleText = '') => {
+      const pt = (power || toughness) ? `${power}/${toughness}` : '';
+      const imageUri = makeTokenImageUri(name, pt, color, oracleText);
+      socket.emit('game:create_token', { name, power, toughness, color, typeLine, imageUri, oracleText });
     },
     copyCard:       (instanceId: string) => socket.emit('game:copy_card', { instanceId }),
     shuffleLibrary: () => socket.emit('game:shuffle_library'),
@@ -2446,8 +2504,8 @@ export default function GameBoardPage() {
       {showTokenModal && (
         <TokenCreateModal
           onClose={() => setShowTokenModal(false)}
-          onCreate={(name, power, toughness, color, typeLine) =>
-            emit.createToken(name, power, toughness, color, typeLine)
+          onCreate={(name, power, toughness, color, typeLine, oracleText) =>
+            emit.createToken(name, power, toughness, color, typeLine, oracleText)
           }
         />
       )}
