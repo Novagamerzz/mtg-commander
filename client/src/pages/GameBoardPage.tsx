@@ -284,6 +284,7 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
   cardW?: number; cardH?: number;
 }) {
   const [menuMode, setMenuMode] = useState<'main' | 'pt' | null>(null);
+  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
   const [ptPow, setPtPow] = useState('');
   const [ptTou, setPtTou] = useState('');
 
@@ -299,7 +300,11 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
   const hasCounters = Object.values(counters).some((n) => n > 0);
   const hasPtOverride = card.powerOverride != null || card.toughnessOverride != null;
 
-  function openMenu() { setMenuMode('main'); }
+  function openMenu(e?: React.MouseEvent) {
+    if (e) setMenuPos({ x: e.clientX, y: e.clientY });
+    setMenuMode('main');
+    onHoverEnd();
+  }
   function closeMenu() { setMenuMode(null); }
 
   return (
@@ -308,8 +313,8 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
       <div draggable
         onDragStart={(e) => { onDragStart(e); closeMenu(); }}
         onClick={onTap}
-        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openMenu(); }}
-        onMouseEnter={() => onHover(card)} onMouseLeave={() => onHoverEnd()}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openMenu(e); }}
+        onMouseEnter={() => { if (!menuMode) onHover(card); }} onMouseLeave={() => onHoverEnd()}
         className="w-full h-full" style={{ cursor: card.tapped ? 'pointer' : 'grab' }}>
         {card.imageUri ? (
           <img src={card.imageUri} alt={card.name} className="w-full h-full object-cover rounded-lg"
@@ -350,18 +355,23 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
       <button
         className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold opacity-0 group-hover:opacity-100 transition z-20"
         style={{ background: '#374151', border: '1px solid #4b5563', color: '#d1d5db' }}
-        onClick={(e) => { e.stopPropagation(); openMenu(); }}>⋮</button>
+        onClick={(e) => { e.stopPropagation(); openMenu(e); }}>⋮</button>
 
       {/* Backdrop — captures clicks outside the menu to close it */}
       {menuMode !== null && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 29 }}
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9998 }}
           onMouseDown={() => setMenuMode(null)} />
       )}
 
       {/* Main menu */}
-      {menuMode === 'main' && (
-        <div className="absolute top-5 right-0 rounded-xl z-30 py-1"
-          style={{ width: 192, background: '#0f172a', border: '1px solid #1e293b',
+      {menuMode === 'main' && (() => {
+        const mw = 192, mh = 380;
+        const ml = menuPos.x + mw + 8 > window.innerWidth ? menuPos.x - mw : menuPos.x + 4;
+        const mt = menuPos.y + mh + 8 > window.innerHeight ? menuPos.y - mh : menuPos.y;
+        return (
+        <div className="rounded-xl py-1"
+          style={{ position: 'fixed', left: ml, top: mt, width: mw, zIndex: 9999,
+            background: '#0f172a', border: '1px solid #1e293b',
             boxShadow: '0 24px 48px rgba(0,0,0,0.9)' }}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}>
@@ -427,12 +437,18 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
               style={{ color: '#7dd3fc' }}>⚙ Set Power/Toughness</button>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Set P/T sub-menu */}
-      {menuMode === 'pt' && (
-        <div className="absolute top-5 right-0 rounded-xl z-30 p-3"
-          style={{ width: 192, background: '#0f172a', border: '1px solid #1e293b',
+      {menuMode === 'pt' && (() => {
+        const mw = 192, mh = 130;
+        const ml = menuPos.x + mw + 8 > window.innerWidth ? menuPos.x - mw : menuPos.x + 4;
+        const mt = menuPos.y + mh + 8 > window.innerHeight ? menuPos.y - mh : menuPos.y;
+        return (
+        <div className="rounded-xl p-3"
+          style={{ position: 'fixed', left: ml, top: mt, width: mw, zIndex: 9999,
+            background: '#0f172a', border: '1px solid #1e293b',
             boxShadow: '0 24px 48px rgba(0,0,0,0.9)' }}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}>
@@ -458,7 +474,8 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
                 fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid #334155' }}>✕</button>
           </div>
         </div>
-      )}
+        );
+      })()}
     </TappedCardWrapper>
   );
 }

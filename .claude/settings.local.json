@@ -12,7 +12,8 @@
       "Read(//tmp/**)",
       "Bash(git -C /Users/nicholasluddy/Projects/mtg-commander log --oneline -5)",
       "Bash(npx tsc *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(xargs ls *)"
     ]
   }
 }
