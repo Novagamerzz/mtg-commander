@@ -1286,12 +1286,13 @@ function TableCanvas({
                     const card = cardMap.get(slot.id);
                     if (!card) return null;
                     const showBadge = slot.groupSize > 1 && slot.groupIndex === slot.groupSize - 1;
+                    const oppCounters = card.counters ?? {};
+                    const oppHasCounters = Object.values(oppCounters).some((n) => n > 0);
+                    const oppKeywords = card.keywords ?? [];
                     return (
                       <div key={slot.id} style={{
                         position: 'absolute', left: slot.x, top: OPP_INFO_H + row.y,
                         zIndex: 2 + slot.groupIndex,
-                        transform: isTopZone ? 'rotate(180deg)' : undefined,
-                        transformOrigin: 'center center',
                       }}
                         onMouseDown={e => e.stopPropagation()}>
                         <TappedCardWrapper card={card} cardW={row.cW} cardH={row.cH}>
@@ -1309,12 +1310,35 @@ function TableCanvas({
                             )}
                           </div>
                         </TappedCardWrapper>
+                        {/* Keyword badges */}
+                        {oppKeywords.length > 0 && (
+                          <div style={{ position: 'absolute', top: 3, left: 3, display: 'flex', flexWrap: 'wrap',
+                            gap: 2, zIndex: 15, pointerEvents: 'none', maxWidth: '90%' }}>
+                            {oppKeywords.map((kw) => (
+                              <span key={kw} style={{
+                                background: `${KEYWORD_COLOR[kw] ?? '#64748b'}33`,
+                                border: `1px solid ${KEYWORD_COLOR[kw] ?? '#64748b'}88`,
+                                color: KEYWORD_COLOR[kw] ?? '#e2e8f0',
+                                borderRadius: 3, padding: '1px 3px', fontSize: 7, fontWeight: 800,
+                              }}>{KEYWORD_ABBR[kw] ?? kw.slice(0, 3).toUpperCase()}</span>
+                            ))}
+                          </div>
+                        )}
+                        {/* Counter badges */}
+                        {oppHasCounters && (
+                          <div style={{ position: 'absolute', bottom: 3, left: 3, display: 'flex', flexWrap: 'wrap',
+                            gap: 2, zIndex: 15, pointerEvents: 'none', maxWidth: '70%' }}>
+                            {Object.entries(oppCounters).filter(([, n]) => n > 0).map(([type, n]) => (
+                              <CounterBadge key={type} type={type} count={n} />
+                            ))}
+                          </div>
+                        )}
+                        {/* Stack count badge */}
                         {showBadge && (
                           <div style={{ position: 'absolute', top: -7, left: -7, zIndex: 30,
                             background: '#2563eb', color: '#fff', borderRadius: 5,
                             padding: '1px 5px', fontSize: 10, fontWeight: 900,
-                            border: '2px solid #1e293b', pointerEvents: 'none',
-                            transform: isTopZone ? 'rotate(180deg)' : undefined }}>
+                            border: '2px solid #1e293b', pointerEvents: 'none' }}>
                             ×{slot.groupSize}
                           </div>
                         )}
