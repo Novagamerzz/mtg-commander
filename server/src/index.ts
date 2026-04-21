@@ -30,6 +30,7 @@ if (process.env.CLIENT_URL) ALLOWED_ORIGINS.push(process.env.CLIENT_URL.trim());
 interface InternalCard {
   instanceId: string; scryfallId: string;
   name: string; imageUri: string; typeLine: string; oracleText: string; tapped: boolean;
+  faceDown?: boolean;
   counters?: Record<string, number>;
   powerOverride?: string | null;
   toughnessOverride?: string | null;
@@ -801,9 +802,21 @@ io.on('connection', (socket) => {
       player.battlefield.find((c) => c.instanceId === instanceId) ??
       player.commandZone.find((c) => c.instanceId === instanceId);
     if (!source) return;
-    const copy: InternalCard = { ...source, instanceId: randomUUID(), tapped: false, counters: {}, powerOverride: null, toughnessOverride: null };
+    const copy: InternalCard = { ...source, instanceId: randomUUID(), tapped: false, faceDown: false, counters: {}, powerOverride: null, toughnessOverride: null };
     player.battlefield.push(copy);
     appendLog(game, `${player.playerName} copied ${source.name} onto the battlefield`);
+    broadcastGame(game);
+  });
+
+  socket.on('game:flip_card', ({ instanceId }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    const card = player.battlefield.find((c) => c.instanceId === instanceId);
+    if (!card) return;
+    card.faceDown = !card.faceDown;
+    appendLog(game, `${player.playerName}: ${card.name} flipped ${card.faceDown ? 'face down' : 'face up'}`);
     broadcastGame(game);
   });
 

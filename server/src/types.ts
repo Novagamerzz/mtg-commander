@@ -28,6 +28,7 @@ export interface GameCard {
   imageUri: string;
   typeLine: string;
   tapped: boolean;
+  faceDown?: boolean;
   counters?: Record<string, number>;
   powerOverride?: string | null;
   toughnessOverride?: string | null;
@@ -149,6 +150,7 @@ export interface ClientToServerEvents {
   'game:tutor': (payload: { instanceId: string; to: 'hand' | 'battlefield' }) => void;
   'game:create_token': (payload: { name: string; power: string; toughness: string; color: string; typeLine: string; imageUri: string; oracleText?: string }) => void;
   'game:copy_card': (payload: { instanceId: string }) => void;
+  'game:flip_card': (payload: { instanceId: string }) => void;
   'game:shuffle_library': () => void;
   'game:update_counter': (payload: { instanceId: string; counter: string; delta: number }) => void;
   'game:set_pt': (payload: { instanceId: string; power: string; toughness: string }) => void;

@@ -678,7 +678,15 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openMenu(); }}
         onMouseEnter={() => { if (!menuMode) onHover(card); }} onMouseLeave={() => onHoverEnd()}
         className="w-full h-full" style={{ cursor: card.tapped ? 'pointer' : 'grab' }}>
-        {card.imageUri ? (
+        {card.faceDown ? (
+          <div className="w-full h-full rounded-lg flex flex-col items-center justify-center gap-1"
+            style={{ background: 'linear-gradient(135deg, #1e1b4b, #0f172a)',
+              border: card.tapped ? '1.5px solid rgba(250,204,21,0.45)' : '1.5px solid rgba(99,102,241,0.4)',
+              boxShadow: card.tapped ? '0 0 10px rgba(250,204,21,0.3)' : '0 4px 10px rgba(0,0,0,0.6)' }}>
+            <span style={{ fontSize: 22, opacity: 0.3 }}>🂠</span>
+            <span style={{ fontSize: 7, color: 'rgba(255,255,255,0.22)', fontWeight: 700, letterSpacing: 1 }}>FACE DOWN</span>
+          </div>
+        ) : card.imageUri ? (
           <img src={card.imageUri} alt={card.name} className="w-full h-full object-cover rounded-lg"
             style={{
               boxShadow: card.tapped ? '0 0 10px rgba(250,204,21,0.4)' : '0 4px 10px rgba(0,0,0,0.6)',
@@ -1298,7 +1306,13 @@ function TableCanvas({
                         <TappedCardWrapper card={card} cardW={row.cW} cardH={row.cH}>
                           <div onMouseEnter={() => onHover(card)} onMouseLeave={onHoverEnd}
                             className="w-full h-full cursor-default">
-                            {card.imageUri ? (
+                            {card.faceDown ? (
+                              <div className="w-full h-full rounded flex flex-col items-center justify-center"
+                                style={{ background: 'linear-gradient(135deg, #1e1b4b, #0f172a)',
+                                  border: '1px solid rgba(99,102,241,0.35)' }}>
+                                <span style={{ fontSize: 12, opacity: 0.28 }}>🂠</span>
+                              </div>
+                            ) : card.imageUri ? (
                               <img src={card.imageUri} className="w-full h-full object-cover rounded"
                                 style={{ opacity: card.tapped ? 0.72 : 1,
                                   border: card.tapped ? '1px solid rgba(250,204,21,0.4)' : '1px solid rgba(255,255,255,0.08)' }} />
@@ -1805,7 +1819,9 @@ export default function GameBoardPage() {
   const [hoverCard, setHoverCard] = useState<GameCard | null>(null);
   const [mouse, setMouse] = useState({ x: 0, y: 0 });
   const [showTokenModal, setShowTokenModal] = useState(false);
-  const hoverBfCardId = useRef<string | null>(null); // tracks which battlefield card is hovered for C-key copy
+  const hoverBfCardId = useRef<string | null>(null);
+  const myBattlefieldRef = useRef<GameCard[]>([]);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
 
   const [zoneModal, setZoneModal] = useState<'graveyard' | 'exile' | 'library' | null>(null);
   const [libraryCards, setLibraryCards] = useState<GameCard[]>([]);
@@ -1897,13 +1913,35 @@ export default function GameBoardPage() {
   // Keyboard shortcuts for hovered battlefield card
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
       const id = hoverBfCardId.current;
       if (!id) return;
-      if (e.key === 'c' || e.key === 'C') socket.emit('game:copy_card', { instanceId: id });
-      if (e.key === '+' || e.key === '=') socket.emit('game:update_counter', { instanceId: id, counter: '+1/+1', delta: 1 });
-      if (e.key === '-' || e.key === '_') socket.emit('game:update_counter', { instanceId: id, counter: '+1/+1', delta: -1 });
-      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); socket.emit('game:move_to_graveyard', { instanceId: id }); setHoverCard(null); }
+      const card = myBattlefieldRef.current.find(c => c.instanceId === id);
+      const isCmd = !!card && !!commanderScryfallId.current && card.scryfallId === commanderScryfallId.current;
+      const k = e.key;
+      if (k === 't' || k === 'T') { socket.emit('game:tap_card', { instanceId: id }); return; }
+      if (k === 'g' || k === 'G') {
+        if (isCmd) setCommanderPopup({ cardName: card.name, instanceId: id, destination: 'graveyard' });
+        else socket.emit('game:move_to_graveyard', { instanceId: id });
+        setHoverCard(null); return;
+      }
+      if (k === 'e' || k === 'E') {
+        if (isCmd) setCommanderPopup({ cardName: card.name, instanceId: id, destination: 'exile' });
+        else socket.emit('game:move_to_exile', { instanceId: id });
+        setHoverCard(null); return;
+      }
+      if (k === 'h' || k === 'H') { socket.emit('game:move_to_hand', { instanceId: id }); setHoverCard(null); return; }
+      if (k === 'c' || k === 'C') { if (isCmd) { socket.emit('game:return_commander', { instanceId: id }); setHoverCard(null); } return; }
+      if (k === 'd' || k === 'D') { socket.emit('game:copy_card', { instanceId: id }); return; }
+      if (k === 'f' || k === 'F') { socket.emit('game:flip_card', { instanceId: id }); return; }
+      if (k === '+' || k === '=') { socket.emit('game:update_counter', { instanceId: id, counter: '+1/+1', delta: 1 }); return; }
+      if (k === '-' || k === '_') { socket.emit('game:update_counter', { instanceId: id, counter: '+1/+1', delta: -1 }); return; }
+      if (k === 'Delete' || k === 'Backspace') {
+        e.preventDefault();
+        if (isCmd) setCommanderPopup({ cardName: card!.name, instanceId: id, destination: 'graveyard' });
+        else socket.emit('game:move_to_graveyard', { instanceId: id });
+        setHoverCard(null);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -1936,6 +1974,7 @@ export default function GameBoardPage() {
 
   const mySocketId = gameState.mySocketId;
   const me         = gameState.players.find((p) => p.socketId === mySocketId);
+  myBattlefieldRef.current = me?.battlefield ?? [];
   const opponents  = gameState.players.filter((p) => p.socketId !== mySocketId);
   const active     = gameState.players[gameState.activePlayerIndex];
   const isMyTurn   = active?.socketId === mySocketId;
@@ -1972,6 +2011,7 @@ export default function GameBoardPage() {
       socket.emit('game:create_token', { name, power, toughness, color, typeLine, imageUri, oracleText });
     },
     copyCard:       (instanceId: string) => socket.emit('game:copy_card', { instanceId }),
+    flipCard:       (instanceId: string) => socket.emit('game:flip_card', { instanceId }),
     shuffleLibrary: () => socket.emit('game:shuffle_library'),
     updateCounter:  (instanceId: string, counter: string, delta: number) =>
       socket.emit('game:update_counter', { instanceId, counter, delta }),
@@ -2105,6 +2145,10 @@ export default function GameBoardPage() {
               </div>
             )}
           </div>
+          <button onClick={() => setShowShortcutHelp(true)}
+            className="text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center transition hover:bg-white/10"
+            style={{ color: '#6b7280', border: '1px solid rgba(255,255,255,0.12)' }}
+            title="Keyboard shortcuts">?</button>
           <button onClick={() => setShowLog(!showLog)} className="text-xs px-2 py-1.5 rounded-lg"
             style={{ color: showLog ? '#9ca3af' : '#4b5563' }}>Log {showLog ? '▾' : '▸'}</button>
           {!me.eliminated && (
@@ -2133,7 +2177,7 @@ export default function GameBoardPage() {
           onDragStartCard={(e, id) => dragStart(e, id, 'battlefield')}
           onPlayCard={emit.playCard}
           onHover={setHoverCard}
-          onHoverEnd={() => setHoverCard(null)}
+          onHoverEnd={() => { setHoverCard(null); hoverBfCardId.current = null; }}
           onBfCardHover={(id) => { hoverBfCardId.current = id; }}
           onUpdateCounter={emit.updateCounter}
           onSetPt={emit.setPt}
@@ -2575,6 +2619,49 @@ export default function GameBoardPage() {
       )}
 
       {/* ── Commander replacement popup ── */}
+      {/* ── Keyboard shortcut cheat sheet ── */}
+      {showShortcutHelp && (
+        <div className="fixed inset-0 flex items-center justify-center px-4"
+          style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)', zIndex: 10000 }}
+          onClick={() => setShowShortcutHelp(false)}>
+          <div className="rounded-2xl p-5 flex flex-col gap-3"
+            style={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)',
+              boxShadow: '0 40px 80px rgba(0,0,0,0.9)', minWidth: 300 }}
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-sm font-bold text-white">Keyboard Shortcuts</h2>
+              <button onClick={() => setShowShortcutHelp(false)}
+                className="w-6 h-6 flex items-center justify-center rounded-lg transition hover:bg-white/10"
+                style={{ color: '#6b7280' }}>×</button>
+            </div>
+            <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+              Hover over a card on the battlefield, then press a key.
+            </p>
+            {([
+              ['T', 'Tap / Untap'],
+              ['G', 'Send to Graveyard'],
+              ['E', 'Exile'],
+              ['H', 'Return to Hand'],
+              ['C', 'Return to Command Zone (commanders only)'],
+              ['D', 'Duplicate / Copy card'],
+              ['F', 'Flip Face Down / Face Up'],
+              ['+  /  =', 'Add +1/+1 counter'],
+              ['−', 'Remove +1/+1 counter'],
+              ['Del', 'Send to Graveyard'],
+            ] as [string, string][]).map(([key, desc]) => (
+              <div key={key} className="flex items-center gap-3">
+                <kbd style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)',
+                  borderRadius: 5, padding: '2px 8px', fontSize: 11, fontFamily: 'monospace',
+                  color: '#e2e8f0', minWidth: 44, textAlign: 'center', display: 'inline-block' }}>
+                  {key}
+                </kbd>
+                <span className="text-xs" style={{ color: 'rgba(255,255,255,0.65)' }}>{desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {commanderPopup && (
         <CommanderReplacementPopup
           cardName={commanderPopup.cardName}
