@@ -65,6 +65,7 @@ interface InternalGame {
   log: string[];
   pendingElimination: { socketId: string; playerName: string; reason: string } | null;
   mulliganPhase: boolean;
+  monarchSocketId: string | null;
 }
 
 interface InternalRoomPlayer {
@@ -152,6 +153,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
     log: game.log,
     pendingElimination: game.pendingElimination,
     mulliganPhase: game.mulliganPhase,
+    monarchSocketId: game.monarchSocketId,
     players: game.players.map((p, i): PersonalPlayerState => ({
       socketId: p.socketId,
       playerName: p.playerName,
@@ -263,6 +265,7 @@ function createGame(room: InternalRoom): InternalGame {
     log: [`Game created — mulligan phase. ${players[0].playerName} goes first.`],
     pendingElimination: null,
     mulliganPhase: true,
+    monarchSocketId: null,
   };
 }
 
@@ -899,6 +902,48 @@ io.on('connection', (socket) => {
     player.graveyard.push(...milled);
     socket.emit('game:mill_result', milled as GameCard[]);
     appendLog(game, `${player.playerName} milled ${n} card${n !== 1 ? 's' : ''}`);
+    broadcastGame(game);
+  });
+
+  socket.on('game:roll_dice', ({ sides }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    const validSides = [4, 6, 8, 10, 12, 20];
+    const s = validSides.includes(sides) ? sides : 20;
+    const result = Math.floor(Math.random() * s) + 1;
+    appendLog(game, `${player.playerName} rolled a d${s} and got ${result}!`);
+    for (const p of game.players) {
+      io.to(p.socketId).emit('game:dice_result', { playerName: player.playerName, sides: s, result });
+    }
+    broadcastGame(game);
+  });
+
+  socket.on('game:claim_monarch', () => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player || player.eliminated) return;
+    const prev = game.monarchSocketId ? game.players.find((p) => p.socketId === game.monarchSocketId)?.playerName : null;
+    game.monarchSocketId = socket.id;
+    appendLog(game, prev
+      ? `${player.playerName} took the monarch from ${prev}!`
+      : `${player.playerName} became the monarch!`);
+    broadcastGame(game);
+  });
+
+  socket.on('game:update_poison', ({ delta }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player || player.eliminated) return;
+    const prev = player.poisonCounters;
+    player.poisonCounters = Math.max(0, prev + delta);
+    appendLog(game, `${player.playerName}: poison → ${player.poisonCounters}`);
+    if (prev < 10 && player.poisonCounters >= 10 && !game.pendingElimination) {
+      game.pendingElimination = { socketId: player.socketId, playerName: player.playerName, reason: `Poison counters: ${player.poisonCounters}` };
+    }
     broadcastGame(game);
   });
 

@@ -1015,7 +1015,7 @@ function CanvasPileZone({ cards, icon, label, color, bgColor, isOver,
 
 // ── Opponent zone header (rendered inside canvas) ─────────────────────────────
 
-function ZoneHeader({ player, color }: { player: PersonalPlayerState; color: string }) {
+function ZoneHeader({ player, color, isMonarch }: { player: PersonalPlayerState; color: string; isMonarch: boolean }) {
   const life = player.life;
   const lifeColor = life <= 0 ? '#ef4444' : life <= 10 ? '#fb923c' : '#f1f5f9';
   const commander = player.commandZone[0];
@@ -1030,16 +1030,22 @@ function ZoneHeader({ player, color }: { player: PersonalPlayerState; color: str
           boxShadow: '0 0 8px #facc15', flexShrink: 0, display: 'inline-block' }} />
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
-        <span style={{ fontWeight: 800, fontSize: 15, color: '#f1f5f9', lineHeight: 1.1 }}>{player.playerName}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          {isMonarch && <span style={{ fontSize: 14, lineHeight: 1 }} title="Monarch">👑</span>}
+          <span style={{ fontWeight: 800, fontSize: 15, color: '#f1f5f9', lineHeight: 1.1 }}>{player.playerName}</span>
+        </div>
         {commander && (
           <span style={{ fontSize: 11, color: '#fbbf24', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             ⚜ {commander.name.split(',')[0]}
           </span>
         )}
       </div>
-      <div style={{ display: 'flex', gap: 14, fontSize: 12, color: '#94a3b8', flexShrink: 0, fontWeight: 600 }}>
+      <div style={{ display: 'flex', gap: 10, fontSize: 12, color: '#94a3b8', flexShrink: 0, fontWeight: 600 }}>
         <span title="Hand">✋ {player.handCount}</span>
         <span title="Library">📚 {player.libraryCount}</span>
+        {player.poisonCounters > 0 && (
+          <span title="Poison" style={{ color: '#a3e635' }}>☠️ {player.poisonCounters}</span>
+        )}
       </div>
       <span style={{ fontSize: 34, fontWeight: 900, fontFamily: 'monospace', lineHeight: 1,
         color: lifeColor, flexShrink: 0,
@@ -1074,13 +1080,14 @@ interface TableCanvasProps {
   onOpenEx: () => void;
   gyCards: GameCard[];
   exCards: GameCard[];
+  monarchSocketId: string | null;
 }
 
 function TableCanvas({
   me, opponents,
   onTapCard, onGraveyardCard, onExileCard, onReturnCmdCard, onReturnHandCard, onGiveControl, onDragStartCard,
   onPlayCard, onHover, onHoverEnd, onBfCardHover, onUpdateCounter, onSetPt,
-  onDropToGy, onDropToEx, onOpenGy, onOpenEx, gyCards, exCards,
+  onDropToGy, onDropToEx, onOpenGy, onOpenEx, gyCards, exCards, monarchSocketId,
 }: TableCanvasProps) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(0.4);
@@ -1176,7 +1183,7 @@ function TableCanvas({
               opacity: player.eliminated ? 0.45 : 1,
               transition: 'opacity 0.4s, border-color 0.4s',
             }}>
-              <ZoneHeader player={player} color={color} />
+              <ZoneHeader player={player} color={color} isMonarch={player.socketId === monarchSocketId} />
 
               {/* Eliminated overlay */}
               {player.eliminated && (
@@ -1268,6 +1275,9 @@ function TableCanvas({
             {me.isActive && (
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#facc15',
                 boxShadow: '0 0 6px #facc15', display: 'inline-block' }} />
+            )}
+            {me.socketId === monarchSocketId && (
+              <span style={{ fontSize: 12, lineHeight: 1 }} title="You are the Monarch">👑</span>
             )}
             <span style={{ fontSize: 13, fontWeight: 800, color: `${myColor}ee` }}>{me.playerName}</span>
           </div>
@@ -1606,6 +1616,9 @@ export default function GameBoardPage() {
   const [showConcedePopup, setShowConcedePopup] = useState(false);
   const [millInputOpen, setMillInputOpen] = useState(false);
   const [millCards, setMillCards] = useState<GameCard[] | null>(null);
+  const [showDicePanel, setShowDicePanel] = useState(false);
+  const [diceResult, setDiceResult] = useState<{ playerName: string; sides: number; result: number } | null>(null);
+  const diceResultTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [timingToast, setTimingToast] = useState<string | null>(null);
   const [overHand, setOverHand] = useState(false);
@@ -1624,6 +1637,11 @@ export default function GameBoardPage() {
     socket.on('game:library_contents', (cards) => { setLibraryCards(cards); setLibraryLoading(false); });
     socket.on('game:scry_cards', (cards) => { setScryCards(cards); setScryInputOpen(false); });
     socket.on('game:mill_result', (cards) => { setMillCards(cards); setMillInputOpen(false); });
+    socket.on('game:dice_result', (data) => {
+      setDiceResult(data);
+      if (diceResultTimer.current) clearTimeout(diceResultTimer.current);
+      diceResultTimer.current = setTimeout(() => setDiceResult(null), 5000);
+    });
     socket.on('game:error', (msg) => {
       setTimingToast(msg);
       if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1640,6 +1658,7 @@ export default function GameBoardPage() {
       socket.off('game:library_contents');
       socket.off('game:scry_cards');
       socket.off('game:mill_result');
+      socket.off('game:dice_result');
       socket.off('game:error');
       socket.off('game:announcement');
       if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1750,6 +1769,9 @@ export default function GameBoardPage() {
     mulliganKeep:        () => socket.emit('game:mulligan_keep'),
     concede:             () => socket.emit('game:concede'),
     mill:                (count: number) => socket.emit('game:mill', { count }),
+    rollDice:            (sides: number) => socket.emit('game:roll_dice', { sides }),
+    claimMonarch:        () => socket.emit('game:claim_monarch'),
+    updatePoison:        (delta: number) => socket.emit('game:update_poison', { delta }),
   };
 
   // ── Timing helper ─────────────────────────────────────────────────────────────
@@ -1836,6 +1858,28 @@ export default function GameBoardPage() {
               </button>
             </>
           )}
+          <div style={{ position: 'relative' }}>
+            <button onClick={() => setShowDicePanel((v) => !v)}
+              className="text-xs font-semibold px-2 py-1.5 rounded-lg transition hover:bg-white/10"
+              style={{ color: showDicePanel ? '#fbbf24' : '#9ca3af' }}>🎲 Dice</button>
+            {showDicePanel && (
+              <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 200,
+                background: '#0f172a', border: '1px solid #334155', borderRadius: 12,
+                padding: '10px 12px', boxShadow: '0 16px 40px rgba(0,0,0,0.9)',
+                display: 'flex', gap: 6, flexWrap: 'wrap', width: 220 }}>
+                {[4,6,8,10,12,20].map((s) => (
+                  <button key={s} onClick={() => { emit.rollDice(s); setShowDicePanel(false); }}
+                    className="font-black text-xs rounded-lg transition hover:brightness-125"
+                    style={{ flex: '1 1 60px', padding: '8px 4px',
+                      background: s === 20 ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.06)',
+                      border: s === 20 ? '1px solid rgba(251,191,36,0.4)' : '1px solid rgba(255,255,255,0.12)',
+                      color: s === 20 ? '#fbbf24' : '#d1d5db', cursor: 'pointer' }}>
+                    d{s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button onClick={() => setShowLog(!showLog)} className="text-xs px-2 py-1.5 rounded-lg"
             style={{ color: showLog ? '#9ca3af' : '#4b5563' }}>Log {showLog ? '▾' : '▸'}</button>
           {!me.eliminated && (
@@ -1880,6 +1924,7 @@ export default function GameBoardPage() {
           }}
           onOpenGy={() => setZoneModal('graveyard')}
           onOpenEx={() => setZoneModal('exile')}
+          monarchSocketId={gameState.monarchSocketId}
         />
       </div>
 
@@ -1903,6 +1948,22 @@ export default function GameBoardPage() {
           <button onClick={() => emit.updateLife(1)}
             className="w-8 h-8 rounded-xl font-black text-lg transition hover:scale-110"
             style={{ background: 'rgba(74,222,128,0.15)', border: '1px solid rgba(74,222,128,0.3)', color: '#86efac' }}>+</button>
+        </div>
+
+        {/* Poison counters */}
+        <div className="flex items-center gap-1 shrink-0"
+          style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 12 }}>
+          <button onClick={() => emit.updatePoison(-1)}
+            className="w-6 h-6 rounded-lg font-black text-sm transition hover:scale-110"
+            style={{ background: 'rgba(163,230,53,0.1)', border: '1px solid rgba(163,230,53,0.25)', color: '#a3e635' }}>−</button>
+          <span className="text-sm font-black font-mono tabular-nums"
+            style={{ color: me.poisonCounters > 0 ? '#a3e635' : '#374151', minWidth: '2.2rem', textAlign: 'center',
+              textShadow: me.poisonCounters >= 8 ? '0 0 8px #a3e635' : 'none' }}>
+            ☠️ {me.poisonCounters}
+          </span>
+          <button onClick={() => emit.updatePoison(1)}
+            className="w-6 h-6 rounded-lg font-black text-sm transition hover:scale-110"
+            style={{ background: 'rgba(163,230,53,0.1)', border: '1px solid rgba(163,230,53,0.25)', color: '#a3e635' }}>+</button>
         </div>
 
         {/* Commander */}
@@ -1982,10 +2043,34 @@ export default function GameBoardPage() {
           <CmdDamageMatrix players={gameState.players} mySocketId={mySocketId} onUpdate={emit.updateCmdDmg} />
         </div>
 
+        {/* Monarch */}
+        <div className="flex flex-col items-center gap-0.5 shrink-0"
+          style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 12 }}>
+          {(() => {
+            const monarch = gameState.players.find((p) => p.socketId === gameState.monarchSocketId);
+            return (
+              <>
+                <span style={{ fontSize: 9, color: '#4b5563', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>Monarch</span>
+                <span style={{ fontSize: 12, color: monarch ? '#fbbf24' : '#374151', fontWeight: 700 }}>
+                  {monarch ? `👑 ${monarch.playerName.split(' ')[0]}` : '— none —'}
+                </span>
+                {gameState.monarchSocketId !== mySocketId && !me.eliminated && (
+                  <button onClick={emit.claimMonarch}
+                    className="text-[9px] font-bold px-2 py-0.5 rounded-md transition hover:brightness-110"
+                    style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', color: '#fbbf24', cursor: 'pointer', marginTop: 1 }}>
+                    Claim
+                  </button>
+                )}
+              </>
+            );
+          })()}
+        </div>
+
         {/* Player name */}
         <div className="flex items-center gap-2 shrink-0"
           style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 12 }}>
           {isMyTurn && !me.eliminated && <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: '#facc15', boxShadow: '0 0 6px #facc15' }} />}
+          {gameState.monarchSocketId === mySocketId && <span style={{ fontSize: 14 }} title="You are the Monarch">👑</span>}
           <span className="text-sm font-bold" style={{ color: me.eliminated ? '#6b7280' : '#f9fafb' }}>{me.playerName}</span>
           {me.eliminated && (
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-md"
@@ -2103,6 +2188,31 @@ export default function GameBoardPage() {
             { label: '↩ Tutor to Hand',      color: '#86efac', onCard: (c) => emit.tutor(c.instanceId, 'hand') },
             { label: '⚡ Put on Battlefield', color: '#fbbf24', onCard: (c) => emit.tutor(c.instanceId, 'battlefield') },
           ]} />
+      )}
+
+      {/* ── Dice result toast ── */}
+      {diceResult && (
+        <div className="fixed top-16 left-1/2 z-50 flex flex-col items-center gap-1 px-6 py-4 rounded-2xl"
+          style={{ transform: 'translateX(-50%)', background: '#0f172a',
+            border: '1px solid rgba(251,191,36,0.45)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.85), 0 0 24px rgba(251,191,36,0.15)',
+            pointerEvents: 'none' }}>
+          <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>
+            {diceResult.playerName}
+          </span>
+          <span style={{ fontSize: 13, color: '#94a3b8' }}>rolled a d{diceResult.sides}</span>
+          <span style={{ fontSize: 52, fontWeight: 900, fontFamily: 'monospace', lineHeight: 1,
+            color: diceResult.result === diceResult.sides ? '#fbbf24' : diceResult.result === 1 ? '#ef4444' : '#f1f5f9',
+            textShadow: diceResult.result === diceResult.sides ? '0 0 20px #fbbf24' : diceResult.result === 1 ? '0 0 16px #ef4444' : 'none' }}>
+            {diceResult.result}
+          </span>
+          {diceResult.result === diceResult.sides && (
+            <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 700 }}>NAT {diceResult.sides}! 🎉</span>
+          )}
+          {diceResult.result === 1 && (
+            <span style={{ fontSize: 11, color: '#ef4444', fontWeight: 700 }}>Critical fail 💀</span>
+          )}
+        </div>
       )}
 
       {/* ── Timing error toast ── */}

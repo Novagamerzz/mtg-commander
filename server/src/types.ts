@@ -100,6 +100,7 @@ export interface PersonalGameState {
   log: string[];
   pendingElimination: { socketId: string; playerName: string; reason: string } | null;
   mulliganPhase: boolean;
+  monarchSocketId: string | null;
 }
 
 // ── Socket Events ─────────────────────────────────────────────────────────────
@@ -115,6 +116,7 @@ export interface ServerToClientEvents {
   'game:library_contents': (cards: GameCard[]) => void;
   'game:scry_cards': (cards: GameCard[]) => void;
   'game:mill_result': (cards: GameCard[]) => void;
+  'game:dice_result': (data: { playerName: string; sides: number; result: number }) => void;
   'player:joined': (player: Player) => void;
   'player:left': (playerId: string) => void;
   'chat:message': (payload: ChatMessage) => void;
@@ -157,6 +159,9 @@ export interface ClientToServerEvents {
   'game:mulligan_keep': () => void;
   'game:concede': () => void;
   'game:mill': (payload: { count: number }) => void;
+  'game:roll_dice': (payload: { sides: number }) => void;
+  'game:claim_monarch': () => void;
+  'game:update_poison': (payload: { delta: number }) => void;
   'game:join': (payload: { gameId: string; playerName: string }) => void;
   'player:update_life': (payload: { delta: number }) => void;
   'chat:send': (message: string) => void;
