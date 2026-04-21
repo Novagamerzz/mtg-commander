@@ -83,13 +83,14 @@ export default function GameRoomPage() {
     // Fetch oracle_text from Scryfall so the server can enforce Flash timing
     const uniqueIds = [...new Set(cards.map((c) => c.scryfall_id))];
     const scryfallData = await fetchCardsByIds(uniqueIds);
-    const oracleMap = new Map(scryfallData.map((c) => [c.id, c.oracle_text ?? '']));
+    const oracleMap   = new Map(scryfallData.map((c) => [c.id, c.oracle_text ?? '']));
+    const typeLineMap = new Map(scryfallData.map((c) => [c.id, c.type_line ?? '']));
 
     const deckCards: DeckCardData[] = cards.map((c) => ({
       scryfallId: c.scryfall_id,
       cardName: c.card_name,
       imageUri: c.image_uri ?? '',
-      typeLine: c.type_line ?? '',
+      typeLine: c.type_line || typeLineMap.get(c.scryfall_id) || '',
       oracleText: oracleMap.get(c.scryfall_id) ?? '',
       quantity: c.quantity ?? 1,
       isCommander: c.is_commander ?? false,

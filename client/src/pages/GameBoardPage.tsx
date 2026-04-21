@@ -487,8 +487,17 @@ const TYPE_ROWS: { label: string; match: (t: string) => boolean; isLand?: boolea
   { label: 'Other',         match: (_) => true },
 ];
 
-// Opponent board uses reversed row order so creatures face each other across the table
-const TYPE_ROWS_OPP = [...TYPE_ROWS].reverse();
+// Opponent board: Lands at top (farthest from center) → Creatures at bottom (closest to center),
+// mirroring the player's layout so the two creature rows face each other across the table.
+// Other MUST remain last so it doesn't swallow all cards before type-specific rows can match.
+const TYPE_ROWS_OPP: typeof TYPE_ROWS = [
+  { label: 'Lands',         match: (t) => t.includes('Land'), isLand: true },
+  { label: 'Planeswalkers', match: (t) => t.includes('Planeswalker') && !t.includes('Creature') },
+  { label: 'Enchantments',  match: (t) => !t.includes('Creature') && !t.includes('Artifact') && t.includes('Enchantment') },
+  { label: 'Artifacts',     match: (t) => !t.includes('Creature') && t.includes('Artifact') },
+  { label: 'Creatures',     match: (t) => t.includes('Creature') },
+  { label: 'Other',         match: (_) => true },
+];
 
 function groupByType(
   cards: GameCard[],
