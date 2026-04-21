@@ -304,6 +304,178 @@ function ScryModal({ cards, onResolve, onClose }: {
   );
 }
 
+function MulliganScreen({ hand, mulliganCount, players, mySocketId, onKeep, onMulligan }: {
+  hand: GameCard[]; mulliganCount: number;
+  players: { socketId: string; playerName: string; mulliganReady: boolean; mulliganCount: number }[];
+  mySocketId: string; onKeep: () => void; onMulligan: () => void;
+}) {
+  const nextDraw = Math.max(0, 6 - mulliganCount);
+  const canMulligan = nextDraw >= 0 && mulliganCount < 7;
+  const readyCount = players.filter((p) => p.mulliganReady).length;
+  const others = players.filter((p) => p.socketId !== mySocketId);
+  return (
+    <div className="fixed inset-0 z-[90] flex flex-col items-center justify-center gap-6 px-6"
+      style={{ background: 'rgba(5,8,12,0.97)', backdropFilter: 'blur(16px)' }}>
+      <div className="text-center">
+        <h1 className="text-3xl font-black tracking-tight" style={{ color: '#f1f5f9' }}>Opening Hand</h1>
+        {mulliganCount > 0
+          ? <p className="text-sm mt-1" style={{ color: '#6b7280' }}>Mulligan {mulliganCount} — drew {hand.length}</p>
+          : <p className="text-sm mt-1" style={{ color: '#4b5563' }}>Keep or mulligan to {nextDraw}</p>}
+      </div>
+      {others.length > 0 && (
+        <div className="flex items-center gap-4 flex-wrap justify-center">
+          {others.map((p) => (
+            <span key={p.socketId} className="text-xs px-3 py-1 rounded-full"
+              style={{ background: p.mulliganReady ? 'rgba(74,222,128,0.1)' : 'rgba(255,255,255,0.05)',
+                border: `1px solid ${p.mulliganReady ? 'rgba(74,222,128,0.3)' : 'rgba(255,255,255,0.1)'}`,
+                color: p.mulliganReady ? '#4ade80' : '#6b7280' }}>
+              {p.mulliganReady ? '✓' : '⏳'} {p.playerName}
+              {p.mulliganReady && p.mulliganCount > 0 ? ` (${p.mulliganCount} mull.)` : ''}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-3 flex-wrap justify-center" style={{ maxWidth: 900 }}>
+        {hand.map((card) => (
+          <div key={card.instanceId} style={{ width: 110, flexShrink: 0 }}>
+            {card.imageUri
+              ? <img src={card.imageUri} alt={card.name} className="rounded-xl w-full"
+                  style={{ boxShadow: '0 8px 24px rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)' }} />
+              : <CardBack style={{ width: 110, height: 154 }} />}
+          </div>
+        ))}
+        {hand.length === 0 && <p style={{ color: '#4b5563', fontSize: 14 }}>Empty hand — you must keep.</p>}
+      </div>
+      <div className="flex gap-4">
+        {canMulligan && (
+          <button onClick={onMulligan}
+            className="px-7 py-3 rounded-2xl font-bold text-sm transition hover:brightness-110"
+            style={{ background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.35)',
+              color: '#fbbf24', cursor: 'pointer' }}>
+            Mulligan (draw {nextDraw})
+          </button>
+        )}
+        <button onClick={onKeep}
+          className="px-7 py-3 rounded-2xl font-bold text-sm transition hover:brightness-110"
+          style={{ background: 'linear-gradient(135deg,#065f46,#047857)',
+            border: '1px solid rgba(52,211,153,0.4)', color: '#34d399', cursor: 'pointer' }}>
+          Keep Hand{mulliganCount > 0 ? ' + Scry 1' : ''}
+        </button>
+      </div>
+      {readyCount > 0 && (
+        <p style={{ fontSize: 12, color: '#374151' }}>{readyCount}/{players.length} players ready</p>
+      )}
+    </div>
+  );
+}
+
+function ConcedePopup({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[85] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(8px)' }}
+      onMouseDown={onCancel}>
+      <div className="rounded-2xl p-7 max-w-sm w-full mx-4 text-center flex flex-col items-center gap-5"
+        style={{ background: '#0f172a', border: '1px solid #334155', boxShadow: '0 32px 64px rgba(0,0,0,0.95)' }}
+        onMouseDown={(e) => e.stopPropagation()}>
+        <p className="text-lg font-bold" style={{ color: '#f1f5f9' }}>Concede the game?</p>
+        <p className="text-sm" style={{ color: '#6b7280' }}>This cannot be undone.</p>
+        <div className="flex gap-3 w-full">
+          <button onClick={onConfirm}
+            className="flex-1 py-3 rounded-xl font-bold text-sm transition hover:brightness-110"
+            style={{ background: 'rgba(220,38,38,0.2)', border: '1px solid rgba(220,38,38,0.4)', color: '#fca5a5', cursor: 'pointer' }}>
+            Concede
+          </button>
+          <button onClick={onCancel}
+            className="flex-1 py-3 rounded-xl font-semibold text-sm transition hover:bg-white/10"
+            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#9ca3af', cursor: 'pointer' }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MillInputPopup({ maxCount, onConfirm, onClose }: {
+  maxCount: number; onConfirm: (n: number) => void; onClose: () => void;
+}) {
+  const [n, setN] = useState(1);
+  return (
+    <div className="fixed inset-0 z-[85] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(6px)' }}
+      onMouseDown={onClose}>
+      <div className="rounded-2xl p-6 flex flex-col gap-4 items-center"
+        style={{ background: '#0f172a', border: '1px solid #334155',
+          boxShadow: '0 32px 64px rgba(0,0,0,0.95)', width: 280 }}
+        onMouseDown={(e) => e.stopPropagation()}>
+        <p className="text-base font-bold" style={{ color: '#e2e8f0' }}>Mill how many cards?</p>
+        <input type="number" min={1} max={maxCount} value={n}
+          onChange={(e) => setN(Math.min(maxCount, Math.max(1, parseInt(e.target.value) || 1)))}
+          className="text-center text-2xl font-black rounded-xl focus:outline-none w-24"
+          style={{ background: '#1e293b', border: '1px solid #334155', color: '#f1f5f9', padding: '8px 0' }} />
+        <p className="text-xs" style={{ color: '#475569' }}>1 – {maxCount} cards</p>
+        <div className="flex gap-3 w-full">
+          <button onClick={() => onConfirm(n)}
+            className="flex-1 py-2.5 rounded-xl font-bold text-sm transition hover:brightness-110"
+            style={{ background: 'rgba(148,163,184,0.15)', border: '1px solid rgba(148,163,184,0.4)', color: '#94a3b8', cursor: 'pointer' }}>
+            Mill {n}
+          </button>
+          <button onClick={onClose}
+            className="px-4 py-2.5 rounded-xl text-sm"
+            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#6b7280', cursor: 'pointer' }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MillResultModal({ cards, onClose }: { cards: GameCard[]; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[85] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}>
+      <div className="rounded-2xl flex flex-col"
+        style={{ background: '#0f172a', border: '1px solid #334155',
+          boxShadow: '0 32px 64px rgba(0,0,0,0.95)', maxWidth: '92vw', maxHeight: '88vh' }}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid #1e293b' }}>
+          <p className="font-bold flex-1" style={{ color: '#94a3b8', fontSize: 16 }}>
+            Milled {cards.length} card{cards.length !== 1 ? 's' : ''}
+          </p>
+          <button onClick={onClose}
+            style={{ width: 30, height: 30, borderRadius: 8, background: '#1e293b', border: '1px solid #334155',
+              color: '#94a3b8', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+        </div>
+        <div style={{ display: 'flex', gap: 12, padding: '16px 18px', overflowX: 'auto', flexWrap: 'nowrap' }}>
+          {cards.map((card) => (
+            <div key={card.instanceId} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
+              gap: 6, flexShrink: 0, width: 100 }}>
+              <div style={{ width: 100, height: 140, borderRadius: 8, overflow: 'hidden',
+                border: '1px solid rgba(148,163,184,0.25)' }}>
+                {card.imageUri
+                  ? <img src={card.imageUri} alt={card.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : <div style={{ width: '100%', height: '100%', background: '#1e293b',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ fontSize: 9, color: '#6b7280', textAlign: 'center', padding: 4 }}>{card.name}</span>
+                    </div>}
+              </div>
+              <p style={{ fontSize: 9, color: '#94a3b8', textAlign: 'center', maxWidth: 96,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card.name}</p>
+            </div>
+          ))}
+        </div>
+        <div style={{ padding: '12px 18px', borderTop: '1px solid #1e293b', display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={onClose}
+            className="px-6 py-2.5 rounded-xl font-bold text-sm"
+            style={{ background: 'rgba(148,163,184,0.12)', border: '1px solid rgba(148,163,184,0.3)', color: '#94a3b8', cursor: 'pointer' }}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Battlefield row organisation ──────────────────────────────────────────────
 
 const TYPE_ROWS: { label: string; match: (t: string) => boolean; isLand?: boolean }[] = [
@@ -1422,6 +1594,9 @@ export default function GameBoardPage() {
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [scryInputOpen, setScryInputOpen] = useState(false);
   const [scryCards, setScryCards] = useState<GameCard[] | null>(null);
+  const [showConcedePopup, setShowConcedePopup] = useState(false);
+  const [millInputOpen, setMillInputOpen] = useState(false);
+  const [millCards, setMillCards] = useState<GameCard[] | null>(null);
 
   const [timingToast, setTimingToast] = useState<string | null>(null);
   const [overHand, setOverHand] = useState(false);
@@ -1439,6 +1614,7 @@ export default function GameBoardPage() {
     socket.on('game:state', setGameState);
     socket.on('game:library_contents', (cards) => { setLibraryCards(cards); setLibraryLoading(false); });
     socket.on('game:scry_cards', (cards) => { setScryCards(cards); setScryInputOpen(false); });
+    socket.on('game:mill_result', (cards) => { setMillCards(cards); setMillInputOpen(false); });
     socket.on('game:error', (msg) => {
       setTimingToast(msg);
       if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1454,6 +1630,7 @@ export default function GameBoardPage() {
       socket.off('game:state', setGameState);
       socket.off('game:library_contents');
       socket.off('game:scry_cards');
+      socket.off('game:mill_result');
       socket.off('game:error');
       socket.off('game:announcement');
       if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1477,6 +1654,7 @@ export default function GameBoardPage() {
       if (e.key === 'c' || e.key === 'C') socket.emit('game:copy_card', { instanceId: id });
       if (e.key === '+' || e.key === '=') socket.emit('game:update_counter', { instanceId: id, counter: '+1/+1', delta: 1 });
       if (e.key === '-' || e.key === '_') socket.emit('game:update_counter', { instanceId: id, counter: '+1/+1', delta: -1 });
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); socket.emit('game:move_to_graveyard', { instanceId: id }); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -1559,6 +1737,10 @@ export default function GameBoardPage() {
       socket.emit('game:scry', { count }),
     scryResolve:         (keepOnTop: string[], putOnBottom: string[]) =>
       socket.emit('game:scry_resolve', { keepOnTop, putOnBottom }),
+    mulligan:            () => socket.emit('game:mulligan'),
+    mulliganKeep:        () => socket.emit('game:mulligan_keep'),
+    concede:             () => socket.emit('game:concede'),
+    mill:                (count: number) => socket.emit('game:mill', { count }),
   };
 
   // ── Timing helper ─────────────────────────────────────────────────────────────
@@ -1647,6 +1829,13 @@ export default function GameBoardPage() {
           )}
           <button onClick={() => setShowLog(!showLog)} className="text-xs px-2 py-1.5 rounded-lg"
             style={{ color: showLog ? '#9ca3af' : '#4b5563' }}>Log {showLog ? '▾' : '▸'}</button>
+          {!me.eliminated && (
+            <button onClick={() => setShowConcedePopup(true)}
+              className="text-xs font-semibold px-2 py-1.5 rounded-lg transition hover:bg-white/10"
+              style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)' }}>
+              Concede
+            </button>
+          )}
           <button onClick={() => navigate('/lobby')} className="text-xs px-2 py-1.5 transition hover:text-red-400"
             style={{ color: '#4b5563' }}>✕</button>
         </div>
@@ -1755,6 +1944,11 @@ export default function GameBoardPage() {
             className="text-xs font-bold px-2 py-1 rounded-lg transition hover:bg-white/10"
             style={{ color: '#7dd3fc', border: '1px solid rgba(125,211,252,0.2)' }}>
             Scry
+          </button>
+          <button onClick={() => setMillInputOpen(true)} title="Mill"
+            className="text-xs font-bold px-2 py-1 rounded-lg transition hover:bg-white/10"
+            style={{ color: '#94a3b8', border: '1px solid rgba(148,163,184,0.2)' }}>
+            Mill
           </button>
           <span style={{ color: '#94a3b8' }}>✋ {me.handCount}</span>
           <button onClick={() => setZoneModal('graveyard')} title="View graveyard"
@@ -1941,6 +2135,43 @@ export default function GameBoardPage() {
             emit.createToken(name, power, toughness, color, typeLine)
           }
         />
+      )}
+
+      {/* ── Mulligan screen ── */}
+      {gameState.mulliganPhase && !me.mulliganReady && !scryCards && (
+        <MulliganScreen
+          hand={me.hand}
+          mulliganCount={me.mulliganCount}
+          players={gameState.players.map((p) => ({
+            socketId: p.socketId, playerName: p.playerName,
+            mulliganReady: p.mulliganReady, mulliganCount: p.mulliganCount,
+          }))}
+          mySocketId={mySocketId}
+          onKeep={() => emit.mulliganKeep()}
+          onMulligan={() => emit.mulligan()}
+        />
+      )}
+
+      {/* ── Concede popup ── */}
+      {showConcedePopup && (
+        <ConcedePopup
+          onConfirm={() => { emit.concede(); setShowConcedePopup(false); }}
+          onCancel={() => setShowConcedePopup(false)}
+        />
+      )}
+
+      {/* ── Mill input ── */}
+      {millInputOpen && (
+        <MillInputPopup
+          maxCount={me.libraryCount}
+          onConfirm={(n) => emit.mill(n)}
+          onClose={() => setMillInputOpen(false)}
+        />
+      )}
+
+      {/* ── Mill result ── */}
+      {millCards && (
+        <MillResultModal cards={millCards} onClose={() => setMillCards(null)} />
       )}
 
       {/* ── Scry input ── */}

@@ -50,6 +50,9 @@ interface InternalPlayer {
   commanderCastCount: number;
   landsPlayedThisTurn: number;
   eliminated: boolean;
+  mulliganCount: number;
+  mulliganReady: boolean;
+  mulliganScryPending: boolean;
 }
 
 interface InternalGame {
@@ -61,6 +64,7 @@ interface InternalGame {
   turn: number;
   log: string[];
   pendingElimination: { socketId: string; playerName: string; reason: string } | null;
+  mulliganPhase: boolean;
 }
 
 interface InternalRoomPlayer {
@@ -147,6 +151,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
     turn: game.turn,
     log: game.log,
     pendingElimination: game.pendingElimination,
+    mulliganPhase: game.mulliganPhase,
     players: game.players.map((p, i): PersonalPlayerState => ({
       socketId: p.socketId,
       playerName: p.playerName,
@@ -164,6 +169,8 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
       commanderCastCount: p.commanderCastCount,
       landsPlayedThisTurn: p.landsPlayedThisTurn,
       eliminated: p.eliminated,
+      mulliganCount: p.mulliganCount,
+      mulliganReady: p.mulliganReady,
     })),
   };
 }
@@ -240,6 +247,9 @@ function createGame(room: InternalRoom): InternalGame {
       commanderCastCount: 0,
       landsPlayedThisTurn: 0,
       eliminated: false,
+      mulliganCount: 0,
+      mulliganReady: false,
+      mulliganScryPending: false,
     };
   });
 
@@ -250,8 +260,9 @@ function createGame(room: InternalRoom): InternalGame {
     activePlayerIndex: 0,
     phase: 'untap',
     turn: 1,
-    log: [`Game started! ${players[0].playerName} goes first.`],
+    log: [`Game created — mulligan phase. ${players[0].playerName} goes first.`],
     pendingElimination: null,
+    mulliganPhase: true,
   };
 }
 
@@ -271,6 +282,13 @@ function advancePhase(game: InternalGame) {
       active.hand.push(active.library.shift()!);
       appendLog(game, `${active.playerName} drew (draw step)`);
     }
+  }
+}
+
+function checkAllMulliganReady(game: InternalGame) {
+  if (game.players.every((p) => p.mulliganReady)) {
+    game.mulliganPhase = false;
+    appendLog(game, `— Turn 1: ${game.players[game.activePlayerIndex].playerName} —`);
   }
 }
 
@@ -707,6 +725,11 @@ io.on('connection', (socket) => {
     const top = keepOnTop.map((id) => scryed.find((c) => c.instanceId === id)).filter(Boolean) as typeof scryed;
     const bot = putOnBottom.map((id) => scryed.find((c) => c.instanceId === id)).filter(Boolean) as typeof scryed;
     player.library = [...top, ...player.library, ...bot];
+    if (game.mulliganPhase && player.mulliganScryPending) {
+      player.mulliganScryPending = false;
+      player.mulliganReady = true;
+      checkAllMulliganReady(game);
+    }
     broadcastGame(game);
   });
 
@@ -803,6 +826,79 @@ io.on('connection', (socket) => {
     if (!game || !game.pendingElimination) return;
     appendLog(game, `Elimination of ${game.pendingElimination.playerName} was undone`);
     game.pendingElimination = null;
+    broadcastGame(game);
+  });
+
+  socket.on('game:mulligan', () => {
+    const game = getGame(socket.id);
+    if (!game || !game.mulliganPhase) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player || player.mulliganReady) return;
+    player.library = shuffle([...player.hand, ...player.library]);
+    player.hand = [];
+    player.mulliganCount++;
+    const drawCount = Math.max(0, 7 - player.mulliganCount);
+    player.hand = player.library.splice(0, drawCount);
+    appendLog(game, `${player.playerName} took a mulligan (draw ${drawCount})`);
+    broadcastGame(game);
+  });
+
+  socket.on('game:mulligan_keep', () => {
+    const game = getGame(socket.id);
+    if (!game || !game.mulliganPhase) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player || player.mulliganReady) return;
+    if (player.mulliganCount > 0) {
+      player.mulliganScryPending = true;
+      socket.emit('game:scry_cards', player.library.slice(0, 1) as GameCard[]);
+      appendLog(game, `${player.playerName} kept their hand (London scry 1)`);
+    } else {
+      player.mulliganReady = true;
+      appendLog(game, `${player.playerName} kept their opening hand`);
+      checkAllMulliganReady(game);
+    }
+    broadcastGame(game);
+  });
+
+  socket.on('game:concede', () => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player || player.eliminated) return;
+    player.eliminated = true;
+    player.graveyard.push(...player.battlefield);
+    player.battlefield = [];
+    if (game.pendingElimination?.socketId === socket.id) game.pendingElimination = null;
+    appendLog(game, `${player.playerName} has conceded`);
+    if (game.players[game.activePlayerIndex].socketId === socket.id) advanceTurn(game);
+    const alive = game.players.filter((p) => !p.eliminated);
+    let msg: string;
+    if (alive.length === 0) {
+      msg = '🤝 The game ends — no winner.';
+      appendLog(game, msg);
+    } else if (alive.length === 1) {
+      msg = `🏆 ${alive[0].playerName} wins!`;
+      appendLog(game, msg);
+    } else {
+      msg = `💀 ${player.playerName} has conceded!`;
+    }
+    for (const p of game.players) {
+      io.to(p.socketId).emit('game:announcement', { message: msg, type: alive.length <= 1 ? 'info' : 'defeat' });
+    }
+    broadcastGame(game);
+  });
+
+  socket.on('game:mill', ({ count }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    const n = Math.min(Math.max(1, Math.floor(count)), player.library.length);
+    if (n === 0) return;
+    const milled = player.library.splice(0, n);
+    player.graveyard.push(...milled);
+    socket.emit('game:mill_result', milled as GameCard[]);
+    appendLog(game, `${player.playerName} milled ${n} card${n !== 1 ? 's' : ''}`);
     broadcastGame(game);
   });
 
