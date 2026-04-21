@@ -84,6 +84,7 @@ export interface PersonalPlayerState {
   isActive: boolean;
   commanderCastCount: number;
   landsPlayedThisTurn: number;
+  landsPlayable: number;
   eliminated: boolean;
   mulliganCount: number;
   mulliganReady: boolean;
@@ -160,6 +161,8 @@ export interface ClientToServerEvents {
   'game:concede': () => void;
   'game:mill': (payload: { count: number }) => void;
   'game:roll_dice': (payload: { sides: number }) => void;
+  'game:set_keywords': (payload: { instanceId: string; keywords: string[] }) => void;
+  'game:set_lands_playable': (payload: { delta: number }) => void;
   'game:claim_monarch': () => void;
   'game:update_poison': (payload: { delta: number }) => void;
   'game:join': (payload: { gameId: string; playerName: string }) => void;

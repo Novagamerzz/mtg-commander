@@ -34,6 +34,7 @@ interface InternalCard {
   powerOverride?: string | null;
   toughnessOverride?: string | null;
   isCommander?: boolean;
+  keywords?: string[];
 }
 
 interface InternalPlayer {
@@ -49,6 +50,7 @@ interface InternalPlayer {
   library: InternalCard[];
   commanderCastCount: number;
   landsPlayedThisTurn: number;
+  landsPlayable: number;
   eliminated: boolean;
   mulliganCount: number;
   mulliganReady: boolean;
@@ -171,6 +173,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
       isActive: i === game.activePlayerIndex,
       commanderCastCount: p.commanderCastCount,
       landsPlayedThisTurn: p.landsPlayedThisTurn,
+      landsPlayable: p.landsPlayable,
       eliminated: p.eliminated,
       mulliganCount: p.mulliganCount,
       mulliganReady: p.mulliganReady,
@@ -249,6 +252,7 @@ function createGame(room: InternalRoom): InternalGame {
       library: libraryCards,
       commanderCastCount: 0,
       landsPlayedThisTurn: 0,
+      landsPlayable: 1,
       eliminated: false,
       mulliganCount: 0,
       mulliganReady: false,
@@ -312,6 +316,7 @@ function advanceTurn(game: InternalGame) {
   const active = game.players[game.activePlayerIndex];
   for (const card of active.battlefield) card.tapped = false;
   active.landsPlayedThisTurn = 0;
+  active.landsPlayable = 1;
   appendLog(game, `— Turn ${game.turn}: ${active.playerName} —`);
 }
 
@@ -356,10 +361,10 @@ function checkPlayTiming(game: InternalGame, player: InternalPlayer, card: Inter
     return `You can only play this during your Main Phase (currently ${phaseName}). Instants can be played at any time.`;
   }
 
-  // Land drop — one per turn
+  // Land drop — limited by landsPlayable (default 1, can be increased by effects like Explore)
   if (typeLine.includes('Land')) {
-    if (player.landsPlayedThisTurn >= 1) {
-      return "You've already played a land this turn. You can only play one land per turn.";
+    if (player.landsPlayedThisTurn >= player.landsPlayable) {
+      return `You've already played ${player.landsPlayable} land${player.landsPlayable !== 1 ? 's' : ''} this turn.`;
     }
   }
 
@@ -927,6 +932,27 @@ io.on('connection', (socket) => {
     player.graveyard.push(...milled);
     socket.emit('game:mill_result', milled as GameCard[]);
     appendLog(game, `${player.playerName} milled ${n} card${n !== 1 ? 's' : ''}`);
+    broadcastGame(game);
+  });
+
+  socket.on('game:set_keywords', ({ instanceId, keywords }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    const card = player.battlefield.find((c) => c.instanceId === instanceId);
+    if (!card) return;
+    card.keywords = keywords.filter((k) => k.trim());
+    broadcastGame(game);
+  });
+
+  socket.on('game:set_lands_playable', ({ delta }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find((p) => p.socketId === socket.id);
+    if (!player) return;
+    player.landsPlayable = Math.max(1, player.landsPlayable + delta);
+    appendLog(game, `${player.playerName}: land plays this turn → ${player.landsPlayable}`);
     broadcastGame(game);
   });
 

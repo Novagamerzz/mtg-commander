@@ -639,7 +639,7 @@ function CounterBadge({ type, count }: { type: string; count: number }) {
 // ── My battlefield card ───────────────────────────────────────────────────────
 
 function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommander, onReturnHand,
-  onGiveControl, opponents, onDragStart, onHover, onHoverEnd, onUpdateCounter, onSetPt,
+  onGiveControl, opponents, onDragStart, onHover, onHoverEnd, onUpdateCounter, onSetPt, onSetKeywords,
   cardW = 140, cardH = 196,
 }: {
   card: GameCard; onTap: () => void; onGraveyard: () => void; onExile: () => void;
@@ -650,6 +650,7 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
   onHover: (c: GameCard) => void; onHoverEnd: () => void;
   onUpdateCounter: (counter: string, delta: number) => void;
   onSetPt: (power: string, toughness: string) => void;
+  onSetKeywords: (keywords: string[]) => void;
   cardW?: number; cardH?: number;
 }) {
   const [menuMode, setMenuMode] = useState<null | 'main' | 'giveControl'>(null);
@@ -691,6 +692,21 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
           </div>
         )}
       </div>
+
+      {/* Keyword badges — top-left */}
+      {(card.keywords ?? []).length > 0 && (
+        <div style={{ position: 'absolute', top: 3, left: 3, display: 'flex', flexWrap: 'wrap',
+          gap: 2, zIndex: 15, pointerEvents: 'none', maxWidth: '90%' }}>
+          {(card.keywords ?? []).map((kw) => (
+            <span key={kw} style={{
+              background: `${KEYWORD_COLOR[kw] ?? '#64748b'}33`,
+              border: `1px solid ${KEYWORD_COLOR[kw] ?? '#64748b'}88`,
+              color: KEYWORD_COLOR[kw] ?? '#e2e8f0',
+              borderRadius: 3, padding: '1px 3px', fontSize: 8, fontWeight: 800, letterSpacing: 0.4,
+            }}>{KEYWORD_ABBR[kw] ?? kw.slice(0, 3).toUpperCase()}</span>
+          ))}
+        </div>
+      )}
 
       {/* Counter badges — bottom-left */}
       {hasCounters && (
@@ -826,6 +842,33 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
                     </button>
                   )}
                 </div>
+
+                {/* Keywords */}
+                <div style={{ padding: '6px 0', borderTop: '1px solid #1e293b' }}>
+                  <p style={{ fontSize: 11, color: '#64748b', padding: '6px 18px 8px',
+                    fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>Keywords</p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, padding: '0 18px 8px' }}>
+                    {KEYWORD_LIST.map((kw) => {
+                      const active = (card.keywords ?? []).includes(kw);
+                      return (
+                        <button key={kw}
+                          onClick={() => {
+                            const current = card.keywords ?? [];
+                            const next = active ? current.filter((k) => k !== kw) : [...current, kw];
+                            onSetKeywords(next);
+                          }}
+                          style={{
+                            padding: '3px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                            background: active ? `${KEYWORD_COLOR[kw]}33` : 'rgba(255,255,255,0.04)',
+                            border: active ? `1px solid ${KEYWORD_COLOR[kw]}88` : '1px solid rgba(255,255,255,0.1)',
+                            color: active ? KEYWORD_COLOR[kw] : '#475569',
+                          }}>
+                          {KEYWORD_ABBR[kw]} <span style={{ opacity: 0.6, fontSize: 9 }}>{kw}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </>
             )}
           </div>
@@ -868,21 +911,51 @@ const CANVAS_H = 2000;
 const OPP_INFO_H = 72;  // opponent info header height
 const MY_LABEL_H = 32;  // my zone top label height
 
+// Keyword abbreviation map
+const KEYWORD_ABBR: Record<string, string> = {
+  Trample: 'TRM', Hexproof: 'HEX', Haste: 'HST', Flying: 'FLY', Vigilance: 'VIG',
+  Lifelink: 'LNK', Deathtouch: 'DTH', 'First Strike': 'FST', 'Double Strike': 'DBL',
+  Indestructible: 'IND', Reach: 'RCH', Menace: 'MNC', Flash: 'FLH',
+};
+const KEYWORD_LIST = Object.keys(KEYWORD_ABBR);
+const KEYWORD_COLOR: Record<string, string> = {
+  Trample: '#f97316', Hexproof: '#22c55e', Haste: '#ef4444', Flying: '#60a5fa',
+  Vigilance: '#a78bfa', Lifelink: '#f472b6', Deathtouch: '#6b7280',
+  'First Strike': '#fbbf24', 'Double Strike': '#fb923c', Indestructible: '#d1d5db',
+  Reach: '#4ade80', Menace: '#c084fc', Flash: '#34d399',
+};
+
 interface CRow {
   label: string; isLand: boolean;
   y: number; cW: number; cH: number;
-  slots: { id: string; x: number }[];
+  slots: { id: string; groupSize: number; groupIndex: number; x: number }[];
 }
+
+const FAN_GAP = 22; // px gap between fanned same-name cards
 
 function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS): CRow[] {
   const out: CRow[] = [];
   let ry = 0;
   for (const { label, cards: rc, isLand } of groupByType(cards, rowDefs)) {
-    const { cW, cH } = cardSizeForRow(rc.length, isLand);
-    out.push({
-      label, isLand, y: ry, cW, cH,
-      slots: rc.map((c, i) => ({ id: c.instanceId, x: C_LBLW + i * (cW + C_HGAP) })),
-    });
+    // Group by name for fan stacking
+    const nameMap = new Map<string, GameCard[]>();
+    for (const c of rc) {
+      const arr = nameMap.get(c.name) ?? [];
+      arr.push(c);
+      nameMap.set(c.name, arr);
+    }
+    // Size cards based on number of groups (unique names) to avoid overcrowding
+    const groupCount = nameMap.size;
+    const { cW, cH } = cardSizeForRow(groupCount, isLand);
+    const slots: CRow['slots'] = [];
+    let x = C_LBLW;
+    for (const [, group] of nameMap) {
+      for (let gi = 0; gi < group.length; gi++) {
+        slots.push({ id: group[gi].instanceId, groupSize: group.length, groupIndex: gi, x: x + gi * FAN_GAP });
+      }
+      x += cW + C_HGAP;
+    }
+    out.push({ label, isLand, y: ry, cW, cH, slots });
     ry += cH + C_RGAP;
   }
   return out;
@@ -915,17 +988,16 @@ function tableLayout(opCount: number): { my: ZoneRect; ops: ZoneRect[] } {
       ],
     };
   }
-  // 3 opponents: top (centered) + left + right
-  const topH = 580, topW = 1800;
-  const sideW = Math.floor((PW - topW - 40) / 2);
-  const sideH = 580;
-  const myY = 20 + topH + GAP + sideH + GAP;
+  // 3 opponents: 4-player quadrant layout
+  // Me=bottom-left  Op0=bottom-right  Op1=top-left  Op2=top-right
+  const hw = Math.floor((PW - 20) / 2);
+  const hh = Math.floor((CANVAS_H - 40 - GAP) / 2);
   return {
-    my:  { x: 20, y: myY, w: PW, h: CANVAS_H - myY - 20 },
+    my:  { x: 20,        y: 20 + hh + GAP, w: hw, h: hh },
     ops: [
-      { x: 20 + Math.floor((PW - topW) / 2), y: 20, w: topW, h: topH },
-      { x: 20,            y: 20 + topH + GAP, w: sideW, h: sideH },
-      { x: 20 + PW - sideW, y: 20 + topH + GAP, w: sideW, h: sideH },
+      { x: 20 + hw + 20, y: 20 + hh + GAP, w: hw, h: hh }, // bottom-right
+      { x: 20,           y: 20,             w: hw, h: hh }, // top-left
+      { x: 20 + hw + 20, y: 20,             w: hw, h: hh }, // top-right
     ],
   };
 }
@@ -1075,6 +1147,7 @@ interface TableCanvasProps {
   onBfCardHover: (id: string | null) => void;
   onUpdateCounter: (instanceId: string, counter: string, delta: number) => void;
   onSetPt: (instanceId: string, power: string, toughness: string) => void;
+  onSetKeywords: (instanceId: string, keywords: string[]) => void;
   onDropToGy: (d: DragData) => void;
   onDropToEx: (d: DragData) => void;
   onOpenGy: () => void;
@@ -1087,7 +1160,7 @@ interface TableCanvasProps {
 function TableCanvas({
   me, opponents,
   onTapCard, onGraveyardCard, onExileCard, onReturnCmdCard, onReturnHandCard, onGiveControl, onDragStartCard,
-  onPlayCard, onHover, onHoverEnd, onBfCardHover, onUpdateCounter, onSetPt,
+  onPlayCard, onHover, onHoverEnd, onBfCardHover, onUpdateCounter, onSetPt, onSetKeywords,
   onDropToGy, onDropToEx, onOpenGy, onOpenEx, gyCards, exCards, monarchSocketId,
 }: TableCanvasProps) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -1099,7 +1172,8 @@ function TableCanvas({
   const cur = useRef({ pan: { x: 0, y: 0 }, zoom: 0.4 });
   cur.current = { pan, zoom };
 
-  const layout = tableLayout(opponents.length);
+  const activeOpponents = opponents.filter((p) => !p.eliminated);
+  const layout = tableLayout(activeOpponents.length);
   const myColor = ZONE_COLORS[0];
 
   function fitTable() {
@@ -1167,11 +1241,14 @@ function TableCanvas({
       }}>
 
         {/* Opponent zones */}
-        {opponents.map((player, i) => {
+        {activeOpponents.map((player, i) => {
           const zone = layout.ops[i];
           if (!zone) return null;
           const color = ZONE_COLORS[(i + 1) % ZONE_COLORS.length];
-          const rows = buildCRows(player.battlefield, TYPE_ROWS_OPP);
+          // Zones above my zone (y < layout.my.y) are "top" zones — use mirrored row order
+          const isTopZone = zone.y < layout.my.y;
+          const rowDefs = isTopZone ? TYPE_ROWS_OPP : TYPE_ROWS;
+          const rows = buildCRows(player.battlefield, rowDefs);
           const cardMap = new Map<string, GameCard>(player.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
           return (
@@ -1208,8 +1285,14 @@ function TableCanvas({
                   {row.slots.map(slot => {
                     const card = cardMap.get(slot.id);
                     if (!card) return null;
+                    const showBadge = slot.groupSize > 1 && slot.groupIndex === slot.groupSize - 1;
                     return (
-                      <div key={slot.id} style={{ position: 'absolute', left: slot.x, top: OPP_INFO_H + row.y }}
+                      <div key={slot.id} style={{
+                        position: 'absolute', left: slot.x, top: OPP_INFO_H + row.y,
+                        zIndex: 2 + slot.groupIndex,
+                        transform: isTopZone ? 'rotate(180deg)' : undefined,
+                        transformOrigin: 'center center',
+                      }}
                         onMouseDown={e => e.stopPropagation()}>
                         <TappedCardWrapper card={card} cardW={row.cW} cardH={row.cH}>
                           <div onMouseEnter={() => onHover(card)} onMouseLeave={onHoverEnd}
@@ -1226,6 +1309,15 @@ function TableCanvas({
                             )}
                           </div>
                         </TappedCardWrapper>
+                        {showBadge && (
+                          <div style={{ position: 'absolute', top: -7, left: -7, zIndex: 30,
+                            background: '#2563eb', color: '#fff', borderRadius: 5,
+                            padding: '1px 5px', fontSize: 10, fontWeight: 900,
+                            border: '2px solid #1e293b', pointerEvents: 'none',
+                            transform: isTopZone ? 'rotate(180deg)' : undefined }}>
+                            ×{slot.groupSize}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -1325,9 +1417,18 @@ function TableCanvas({
               {row.slots.map(slot => {
                 const card = myCardMap.get(slot.id);
                 if (!card) return null;
+                const showBadge = slot.groupSize > 1 && slot.groupIndex === slot.groupSize - 1;
                 return (
-                  <div key={slot.id} style={{ position: 'absolute', left: slot.x, top: MY_LABEL_H + row.y, zIndex: 2 }}
+                  <div key={slot.id} style={{ position: 'absolute', left: slot.x, top: MY_LABEL_H + row.y, zIndex: 2 + slot.groupIndex }}
                     onMouseDown={e => e.stopPropagation()}>
+                    {showBadge && (
+                      <div style={{ position: 'absolute', top: -7, left: -7, zIndex: 30,
+                        background: '#2563eb', color: '#fff', borderRadius: 5,
+                        padding: '1px 5px', fontSize: 10, fontWeight: 900,
+                        border: '2px solid #1e293b', pointerEvents: 'none' }}>
+                        ×{slot.groupSize}
+                      </div>
+                    )}
                     <MyBattlefieldCard
                       card={card} cardW={row.cW} cardH={row.cH}
                       onTap={() => onTapCard(card.instanceId)}
@@ -1342,6 +1443,7 @@ function TableCanvas({
                       onHoverEnd={() => { onBfCardHover(null); onHoverEnd(); }}
                       onUpdateCounter={(counter, delta) => onUpdateCounter(card.instanceId, counter, delta)}
                       onSetPt={(power, toughness) => onSetPt(card.instanceId, power, toughness)}
+                      onSetKeywords={(kws) => onSetKeywords(card.instanceId, kws)}
                     />
                   </div>
                 );
@@ -1399,33 +1501,32 @@ function CmdDamageMatrix({ players, mySocketId, onUpdate }: {
   onUpdate: (from: string, delta: number) => void;
 }) {
   const me = players.find((p) => p.socketId === mySocketId);
-  if (!me || players.filter((p) => p.socketId !== mySocketId).length === 0) return null;
+  const opponents = players.filter((p) => p.socketId !== mySocketId && !p.eliminated);
+  if (!me || opponents.length === 0) return null;
   return (
-    <div className="rounded-xl p-3 shrink-0"
-      style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.07)', minWidth: 180 }}>
-      <p className="text-[9px] font-bold uppercase tracking-widest mb-2.5" style={{ color: 'rgba(255,255,255,0.28)' }}>
-        Cmd Damage → You
+    <div className="rounded-xl shrink-0"
+      style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.07)', minWidth: 160, padding: '8px 10px' }}>
+      <p className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{ color: 'rgba(255,255,255,0.28)' }}>
+        Cmd Dmg → You
       </p>
-      <div className="flex flex-col gap-2.5">
-        {players.filter((p) => p.socketId !== mySocketId).map((src) => {
+      <div className="flex flex-col gap-1.5">
+        {opponents.map((src) => {
           const dmg = me.commanderDamage[src.socketId] ?? 0;
           const lethal = dmg >= 21, warn = dmg >= 17;
-          const color = lethal ? '#ef4444' : warn ? '#f97316' : '#d1d5db';
-          const cmdName = (src.commandZone[0]?.name ?? src.playerName).split(',')[0];
+          const numColor = lethal ? '#ef4444' : warn ? '#f97316' : '#e2e8f0';
           return (
-            <div key={src.socketId}>
-              <p className="text-[10px] truncate mb-0.5" style={{ color: '#6b7280' }} title={cmdName}>{cmdName}</p>
-              <div className="flex items-center gap-1">
-                <button onClick={() => onUpdate(src.socketId, -1)}
-                  className="w-5 h-5 rounded flex items-center justify-center text-sm transition hover:bg-white/10"
-                  style={{ color: '#6b7280' }}>−</button>
-                <span className="font-black font-mono tabular-nums w-7 text-center text-lg"
-                  style={{ color, textShadow: lethal ? '0 0 10px #ef4444' : 'none' }}>{dmg}</span>
-                <button onClick={() => onUpdate(src.socketId, 1)}
-                  className="w-5 h-5 rounded flex items-center justify-center text-sm transition hover:bg-white/10"
-                  style={{ color: '#6b7280' }}>+</button>
-                {lethal && <span className="text-[9px] font-bold animate-pulse" style={{ color: '#ef4444' }}>LETHAL</span>}
-              </div>
+            <div key={src.socketId} className="flex items-center gap-1.5">
+              <span className="text-[10px] truncate flex-1" style={{ color: '#94a3b8', maxWidth: 64 }}
+                title={src.playerName}>{src.playerName.split(' ')[0]}</span>
+              <button onClick={() => onUpdate(src.socketId, -1)}
+                className="w-6 h-6 rounded-lg flex items-center justify-center transition hover:bg-white/10"
+                style={{ background: 'rgba(255,255,255,0.05)', color: '#6b7280', fontSize: 14 }}>−</button>
+              <span className="font-black font-mono tabular-nums text-base w-8 text-center"
+                style={{ color: numColor, textShadow: lethal ? '0 0 8px #ef4444' : 'none' }}>{dmg}</span>
+              <button onClick={() => onUpdate(src.socketId, 1)}
+                className="w-6 h-6 rounded-lg flex items-center justify-center transition hover:bg-white/10"
+                style={{ background: 'rgba(255,255,255,0.05)', color: '#6b7280', fontSize: 14 }}>+</button>
+              {lethal && <span className="text-[8px] font-black animate-pulse" style={{ color: '#ef4444' }}>KO</span>}
             </div>
           );
         })}
@@ -1507,14 +1608,15 @@ function TokenCreateModal({ onClose, onCreate }: {
   const [toughness, setToughness] = useState('1');
   const [color, setColor]         = useState<TokenColor>('green');
   const [typeLine, setTypeLine]   = useState('Token Creature');
+  const [qty, setQty]             = useState(1);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(6px)' }}
+    <div className="fixed inset-0 flex items-center justify-center px-4"
+      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(6px)', zIndex: 10000 }}
       onClick={onClose}>
-      <div className="rounded-2xl p-5 flex flex-col gap-4"
-        style={{ width: 380, background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)',
-          boxShadow: '0 40px 80px rgba(0,0,0,0.9)' }}
+      <div className="rounded-2xl p-5 flex flex-col gap-3 w-full overflow-y-auto"
+        style={{ maxWidth: 380, maxHeight: '90vh', background: '#0f172a',
+          border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 40px 80px rgba(0,0,0,0.9)' }}
         onClick={(e) => e.stopPropagation()}>
 
         <div className="flex items-center justify-between">
@@ -1583,14 +1685,28 @@ function TokenCreateModal({ onClose, onCreate }: {
             style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#e5e7eb' }} />
         </div>
 
+        {/* Quantity */}
+        <div className="flex items-center gap-3">
+          <label className="text-[10px] font-semibold uppercase tracking-widest shrink-0" style={{ color: 'rgba(255,255,255,0.4)' }}>Quantity</label>
+          <div className="flex items-center gap-2 flex-1">
+            <button onClick={() => setQty(q => Math.max(1, q - 1))}
+              className="w-7 h-7 rounded-lg font-black transition hover:bg-white/10"
+              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#d1d5db' }}>−</button>
+            <span className="font-black text-base text-center" style={{ color: '#f1f5f9', minWidth: 28 }}>{qty}</span>
+            <button onClick={() => setQty(q => Math.min(20, q + 1))}
+              className="w-7 h-7 rounded-lg font-black transition hover:bg-white/10"
+              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#d1d5db' }}>+</button>
+          </div>
+        </div>
+
         <button
-          onClick={() => { if (name.trim()) { onCreate(name.trim(), power, toughness, color, typeLine); onClose(); } }}
+          onClick={() => { if (name.trim()) { for (let i = 0; i < qty; i++) onCreate(name.trim(), power, toughness, color, typeLine); onClose(); } }}
           disabled={!name.trim()}
           className="w-full py-3 rounded-xl font-bold text-sm transition hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
           style={{ background: 'linear-gradient(135deg, #166534, #14532d)',
             border: '1px solid rgba(74,222,128,0.3)', color: '#86efac',
             boxShadow: '0 0 16px rgba(74,222,128,0.15)' }}>
-          ✦ Create Token
+          ✦ Create {qty > 1 ? `${qty}× ` : ''}Token{qty > 1 ? 's' : ''}
         </button>
       </div>
     </div>
@@ -1689,7 +1805,7 @@ export default function GameBoardPage() {
       if (e.key === 'c' || e.key === 'C') socket.emit('game:copy_card', { instanceId: id });
       if (e.key === '+' || e.key === '=') socket.emit('game:update_counter', { instanceId: id, counter: '+1/+1', delta: 1 });
       if (e.key === '-' || e.key === '_') socket.emit('game:update_counter', { instanceId: id, counter: '+1/+1', delta: -1 });
-      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); socket.emit('game:move_to_graveyard', { instanceId: id }); }
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); socket.emit('game:move_to_graveyard', { instanceId: id }); setHoverCard(null); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -1779,6 +1895,8 @@ export default function GameBoardPage() {
     rollDice:            (sides: number) => socket.emit('game:roll_dice', { sides }),
     claimMonarch:        () => socket.emit('game:claim_monarch'),
     updatePoison:        (delta: number) => socket.emit('game:update_poison', { delta }),
+    setKeywords:         (instanceId: string, keywords: string[]) => socket.emit('game:set_keywords', { instanceId, keywords }),
+    setLandsPlayable:    (delta: number) => socket.emit('game:set_lands_playable', { delta }),
   };
 
   // ── Timing helper ─────────────────────────────────────────────────────────────
@@ -1791,8 +1909,8 @@ export default function GameBoardPage() {
       const phaseLabel = PHASES.find((p) => p.key === gameState!.phase)?.label ?? gameState!.phase;
       return { playable: false, reason: `Main Phase only — currently ${phaseLabel}` };
     }
-    if (card.typeLine?.includes('Land') && me!.landsPlayedThisTurn >= 1) {
-      return { playable: false, reason: 'Already played a land this turn' };
+    if (card.typeLine?.includes('Land') && me!.landsPlayedThisTurn >= me!.landsPlayable) {
+      return { playable: false, reason: `Already played ${me!.landsPlayable} land${me!.landsPlayable !== 1 ? 's' : ''} this turn` };
     }
     return { playable: true, reason: '' };
   }
@@ -1870,7 +1988,7 @@ export default function GameBoardPage() {
               className="text-xs font-semibold px-2 py-1.5 rounded-lg transition hover:bg-white/10"
               style={{ color: showDicePanel ? '#fbbf24' : '#9ca3af' }}>🎲 Dice</button>
             {showDicePanel && (
-              <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 200,
+              <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 9999,
                 background: '#0f172a', border: '1px solid #334155', borderRadius: 12,
                 padding: '10px 12px', boxShadow: '0 16px 40px rgba(0,0,0,0.9)',
                 display: 'flex', gap: 6, flexWrap: 'wrap', width: 220 }}>
@@ -1919,6 +2037,7 @@ export default function GameBoardPage() {
           onBfCardHover={(id) => { hoverBfCardId.current = id; }}
           onUpdateCounter={emit.updateCounter}
           onSetPt={emit.setPt}
+          onSetKeywords={emit.setKeywords}
           gyCards={me.graveyard}
           exCards={me.exile}
           onDropToGy={(d) => {
@@ -1971,6 +2090,24 @@ export default function GameBoardPage() {
           <button onClick={() => emit.updatePoison(1)}
             className="w-6 h-6 rounded-lg font-black text-sm transition hover:scale-110"
             style={{ background: 'rgba(163,230,53,0.1)', border: '1px solid rgba(163,230,53,0.25)', color: '#a3e635' }}>+</button>
+        </div>
+
+        {/* Land plays counter */}
+        <div className="flex flex-col items-center gap-0.5 shrink-0"
+          style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 12 }}>
+          <span style={{ fontSize: 9, color: '#4b5563', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>Lands</span>
+          <div className="flex items-center gap-1">
+            <button onClick={() => emit.setLandsPlayable(-1)}
+              className="w-5 h-5 rounded text-xs transition hover:bg-white/10"
+              style={{ color: '#6b7280' }}>−</button>
+            <span style={{ fontSize: 12, fontWeight: 900, color: me.landsPlayedThisTurn >= me.landsPlayable ? '#f97316' : '#4ade80',
+              minWidth: 28, textAlign: 'center' }}>
+              {me.landsPlayedThisTurn}/{me.landsPlayable}
+            </span>
+            <button onClick={() => emit.setLandsPlayable(1)}
+              className="w-5 h-5 rounded text-xs transition hover:bg-white/10"
+              style={{ color: '#6b7280' }}>+</button>
+          </div>
         </div>
 
         {/* Commander */}
@@ -2087,6 +2224,16 @@ export default function GameBoardPage() {
           )}
         </div>
       </div>
+
+      {/* ── Spectator overlay (shown when local player is eliminated) ── */}
+      {me.eliminated && (
+        <div className="fixed top-14 left-1/2 z-40 px-4 py-2 rounded-full pointer-events-none"
+          style={{ transform: 'translateX(-50%)',
+            background: 'rgba(0,0,0,0.75)', border: '1px solid rgba(255,255,255,0.15)',
+            backdropFilter: 'blur(6px)' }}>
+          <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>👁 Spectating</span>
+        </div>
+      )}
 
       {/* ── My hand (pinned at bottom) ── */}
       <div className="shrink-0 flex items-end gap-2 px-5 pb-3 pt-1 overflow-x-auto"
