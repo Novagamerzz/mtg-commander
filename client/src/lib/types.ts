@@ -31,6 +31,7 @@ export interface GameCard {
   counters?: Record<string, number>;
   powerOverride?: string | null;
   toughnessOverride?: string | null;
+  isCommander?: boolean;
 }
 
 export interface DeckCardData {

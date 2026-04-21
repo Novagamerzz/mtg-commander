@@ -33,6 +33,7 @@ interface InternalCard {
   counters?: Record<string, number>;
   powerOverride?: string | null;
   toughnessOverride?: string | null;
+  isCommander?: boolean;
 }
 
 interface InternalPlayer {
@@ -210,6 +211,7 @@ function createGame(room: InternalRoom): InternalGame {
           typeLine: commanderData.typeLine,
           oracleText: commanderData.oracleText ?? '',
           tapped: false,
+          isCommander: true,
         }]
       : [];
 
@@ -600,7 +602,7 @@ io.on('connection', (socket) => {
     if (!game) return;
     const player = game.players.find((p) => p.socketId === socket.id);
     if (!player) return;
-    for (const zone of [player.graveyard, player.exile]) {
+    for (const zone of [player.battlefield, player.graveyard, player.exile]) {
       const card = moveCard(zone, player.hand, instanceId);
       if (card) { appendLog(game, `${player.playerName}: ${card.name} → hand`); broadcastGame(game); return; }
     }
