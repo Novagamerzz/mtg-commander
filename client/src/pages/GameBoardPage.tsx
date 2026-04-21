@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useLayoutEffect } from 'react';
+import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { socket } from '../lib/socket';
 import type { PersonalGameState, PersonalPlayerState, GameCard, TurnPhase } from '../lib/types';
@@ -284,9 +285,10 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
   cardW?: number; cardH?: number;
 }) {
   const [menuMode, setMenuMode] = useState<'main' | 'pt' | null>(null);
-  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
+  const [menuPos, setMenuPos] = useState({ left: 0, top: 0, right: 0, bottom: 0 });
   const [ptPow, setPtPow] = useState('');
   const [ptTou, setPtTou] = useState('');
+  const cardRef = useRef<HTMLDivElement>(null);
 
   // Close menu on Escape
   useEffect(() => {
@@ -300,8 +302,11 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
   const hasCounters = Object.values(counters).some((n) => n > 0);
   const hasPtOverride = card.powerOverride != null || card.toughnessOverride != null;
 
-  function openMenu(e?: React.MouseEvent) {
-    if (e) setMenuPos({ x: e.clientX, y: e.clientY });
+  function openMenu() {
+    if (cardRef.current) {
+      const r = cardRef.current.getBoundingClientRect();
+      setMenuPos({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    }
     setMenuMode('main');
     onHoverEnd();
   }
@@ -310,10 +315,10 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
   return (
     <TappedCardWrapper card={card} cardW={cardW} cardH={cardH} className="group">
       {/* Card face */}
-      <div draggable
+      <div ref={cardRef} draggable
         onDragStart={(e) => { onDragStart(e); closeMenu(); }}
         onClick={onTap}
-        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openMenu(e); }}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openMenu(); }}
         onMouseEnter={() => { if (!menuMode) onHover(card); }} onMouseLeave={() => onHoverEnd()}
         className="w-full h-full" style={{ cursor: card.tapped ? 'pointer' : 'grab' }}>
         {card.imageUri ? (
@@ -355,26 +360,27 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
       <button
         className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold opacity-0 group-hover:opacity-100 transition z-20"
         style={{ background: '#374151', border: '1px solid #4b5563', color: '#d1d5db' }}
-        onClick={(e) => { e.stopPropagation(); openMenu(e); }}>⋮</button>
+        onClick={(e) => { e.stopPropagation(); openMenu(); }}>⋮</button>
 
-      {/* Backdrop — captures clicks outside the menu to close it */}
-      {menuMode !== null && (
+      {/* Backdrop + menus — portaled to document.body to escape stacking contexts */}
+      {menuMode !== null && ReactDOM.createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 9998 }}
-          onMouseDown={() => setMenuMode(null)} />
+          onMouseDown={() => setMenuMode(null)} />,
+        document.body
       )}
 
       {/* Main menu */}
       {menuMode === 'main' && (() => {
         const mw = 240, mh = 460;
-        const ml = menuPos.x + mw + 8 > window.innerWidth ? menuPos.x - mw : menuPos.x + 4;
-        const mt = menuPos.y + mh + 8 > window.innerHeight ? menuPos.y - mh : menuPos.y;
+        const ml = menuPos.right + 8 + mw > window.innerWidth ? menuPos.left - mw - 8 : menuPos.right + 8;
+        const mt = menuPos.top + mh > window.innerHeight ? menuPos.bottom - mh : menuPos.top;
         const btnStyle: React.CSSProperties = {
           width: 26, height: 26, borderRadius: 6, background: '#1e293b',
           border: '1px solid #334155', color: '#cbd5e1', fontSize: 16,
           lineHeight: 1, cursor: 'pointer', flexShrink: 0, display: 'flex',
           alignItems: 'center', justifyContent: 'center',
         };
-        return (
+        return ReactDOM.createPortal(
         <div className="rounded-xl"
           style={{ position: 'fixed', left: ml, top: mt, width: mw, zIndex: 9999,
             background: '#0f172a', border: '1px solid #334155',
@@ -460,16 +466,17 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
               ⚙ Set Power / Toughness
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
         );
       })()}
 
       {/* Set P/T sub-menu */}
       {menuMode === 'pt' && (() => {
         const mw = 240, mh = 140;
-        const ml = menuPos.x + mw + 8 > window.innerWidth ? menuPos.x - mw : menuPos.x + 4;
-        const mt = menuPos.y + mh + 8 > window.innerHeight ? menuPos.y - mh : menuPos.y;
-        return (
+        const ml = menuPos.right + 8 + mw > window.innerWidth ? menuPos.left - mw - 8 : menuPos.right + 8;
+        const mt = menuPos.top + mh > window.innerHeight ? menuPos.bottom - mh : menuPos.top;
+        return ReactDOM.createPortal(
         <div className="rounded-xl p-3"
           style={{ position: 'fixed', left: ml, top: mt, width: mw, zIndex: 9999,
             background: '#0f172a', border: '1px solid #1e293b',
@@ -497,7 +504,8 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
               style={{ flex: 1, padding: '4px', borderRadius: 6, background: '#1e293b', color: '#64748b',
                 fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid #334155' }}>✕</button>
           </div>
-        </div>
+        </div>,
+        document.body
         );
       })()}
     </TappedCardWrapper>
