@@ -148,9 +148,11 @@ function toPublicRoom(room: InternalRoom): Room {
 }
 
 function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameState {
+  const activePlayer = game.players[game.activePlayerIndex];
   return {
     roomId: game.roomId,
     mySocketId,
+    currentTurnUserId: activePlayer?.userId ?? null,
     turnOrder: game.turnOrder,
     activePlayerIndex: game.activePlayerIndex,
     phase: game.phase,
@@ -161,6 +163,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
     monarchSocketId: game.monarchSocketId,
     players: game.players.map((p, i): PersonalPlayerState => ({
       socketId: p.socketId,
+      userId: p.userId,
       playerName: p.playerName,
       life: p.life,
       commanderDamage: p.commanderDamage,
@@ -269,7 +272,7 @@ function createGame(room: InternalRoom): InternalGame {
   return {
     roomId: room.id,
     players,
-    turnOrder: players.map((p) => p.socketId),
+    turnOrder: players.map((p) => p.userId),   // stable user IDs, never socket IDs
     activePlayerIndex: 0,
     phase: 'untap',
     turn: 1,
@@ -353,12 +356,11 @@ function checkPlayTiming(game: InternalGame, player: InternalPlayer, card: Inter
   if (isInstant) return null; // Always legal
 
   // Everything else is sorcery speed
-  const isYourTurn = game.turnOrder[game.activePlayerIndex] === player.socketId;
+  const activePlayer = game.players[game.activePlayerIndex];
+  const isYourTurn = activePlayer?.socketId === player.socketId;
 
   if (!isYourTurn) {
-    return `You can only play instants right now — it's ${
-      game.players.find((p) => p.socketId === game.turnOrder[game.activePlayerIndex])?.playerName ?? 'another player'
-    }'s turn.`;
+    return `You can only play instants right now — it's ${activePlayer?.playerName ?? 'another player'}'s turn.`;
   }
 
   const phase = game.phase;
@@ -528,6 +530,7 @@ io.on('connection', (socket) => {
 
     // Always (re-)map this socket and join the room channel
     socketToRoom.set(socket.id, roomId);
+    if (payload?.userId) userIdToRoom.set(payload.userId, roomId);
     socket.join(roomId);
 
     // Diagnostic log: verify state the reconnected player will receive
@@ -592,14 +595,14 @@ io.on('connection', (socket) => {
 
   socket.on('game:end_phase', () => {
     const game = getGame(socket.id);
-    if (!game || game.turnOrder[game.activePlayerIndex] !== socket.id) return;
+    if (!game || game.players[game.activePlayerIndex]?.socketId !== socket.id) return;
     advancePhase(game);
     broadcastGame(game);
   });
 
   socket.on('game:end_turn', () => {
     const game = getGame(socket.id);
-    if (!game || game.turnOrder[game.activePlayerIndex] !== socket.id) return;
+    if (!game || game.players[game.activePlayerIndex]?.socketId !== socket.id) return;
     advanceTurn(game);
     broadcastGame(game);
   });

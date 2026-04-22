@@ -75,6 +75,7 @@ export type TurnPhase = 'untap' | 'upkeep' | 'draw' | 'main1' | 'combat' | 'main
 
 export interface PersonalPlayerState {
   socketId: string;
+  userId: string;
   playerName: string;
   life: number;
   commanderDamage: Record<string, number>;
@@ -98,6 +99,7 @@ export interface PersonalPlayerState {
 export interface PersonalGameState {
   roomId: string;
   mySocketId: string;
+  currentTurnUserId: string | null;
   players: PersonalPlayerState[];
   turnOrder: string[];
   activePlayerIndex: number;

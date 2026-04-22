@@ -2042,11 +2042,10 @@ export default function GameBoardPage() {
       setGameState(state);
       // Diagnostic: verify turn/phase is correct after reconnect
       const me = state.players.find(p => p.socketId === state.mySocketId);
-      const active = state.players[state.activePlayerIndex];
-      const isMyTurn = active?.socketId === state.mySocketId;
+      const isMyTurn = state.currentTurnUserId != null && state.currentTurnUserId === user?.id;
       console.log(
         `[game:state] isMyTurn=${isMyTurn} | phase=${state.phase} | ` +
-        `activeTurn=${active?.playerName ?? '?'} | me=${me?.playerName ?? '?'}`
+        `currentTurnUserId=${state.currentTurnUserId} | myUserId=${user?.id} | me=${me?.playerName ?? '?'}`
       );
     });
     socket.on('game:library_contents', (cards) => { setLibraryCards(cards); setLibraryLoading(false); });
@@ -2201,7 +2200,7 @@ export default function GameBoardPage() {
   myBattlefieldRef.current = me?.battlefield ?? [];
   const opponents  = gameState.players.filter((p) => p.socketId !== mySocketId);
   const active     = gameState.players[gameState.activePlayerIndex];
-  const isMyTurn   = active?.socketId === mySocketId;
+  const isMyTurn   = gameState.currentTurnUserId != null && gameState.currentTurnUserId === user?.id;
 
   if (!me) return (
     <div className="h-screen flex items-center justify-center" style={FELT}>
