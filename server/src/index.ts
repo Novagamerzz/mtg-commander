@@ -30,6 +30,7 @@ if (process.env.CLIENT_URL) ALLOWED_ORIGINS.push(process.env.CLIENT_URL.trim());
 interface InternalCard {
   instanceId: string; scryfallId: string;
   name: string; imageUri: string; typeLine: string; oracleText: string; tapped: boolean;
+  power?: string; toughness?: string;
   faceDown?: boolean;
   counters?: Record<string, number>;
   powerOverride?: string | null;
@@ -76,7 +77,7 @@ interface InternalRoomPlayer {
   deckId: string | null; deckName: string | null;
   deckCards: {
     scryfallId: string; cardName: string; imageUri: string;
-    typeLine: string; oracleText: string; quantity: number; isCommander: boolean;
+    typeLine: string; oracleText: string; power?: string; toughness?: string; quantity: number; isCommander: boolean;
   }[];
 }
 
@@ -214,6 +215,8 @@ function createGame(room: InternalRoom): InternalGame {
           typeLine: dc.typeLine,
           oracleText: dc.oracleText ?? '',
           tapped: false,
+          power: dc.power,
+          toughness: dc.toughness,
         }))
       )
     );
@@ -230,6 +233,8 @@ function createGame(room: InternalRoom): InternalGame {
           oracleText: commanderData.oracleText ?? '',
           tapped: false,
           isCommander: true,
+          power: commanderData.power,
+          toughness: commanderData.toughness,
         }]
       : [];
 
@@ -785,6 +790,8 @@ io.on('connection', (socket) => {
       typeLine,
       oracleText: oracleText || (power && toughness ? `${power}/${toughness}` : ''),
       tapped: false,
+      power: power || undefined,
+      toughness: toughness || undefined,
     };
     player.battlefield.push(token);
     const ptStr = power && toughness ? ` (${power}/${toughness})` : '';
@@ -1028,6 +1035,15 @@ io.on('connection', (socket) => {
       appendLog(game, `${fromPlayer.playerName} gave ${card.name} to ${toPlayer.playerName}`);
       broadcastGame(game);
     }
+  });
+
+  socket.on('game:declare_blockers', ({ blockerIds }) => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find(p => p.socketId === socket.id);
+    if (!player) return;
+    appendLog(game, `${player.playerName} declared ${blockerIds.length} blocker${blockerIds.length !== 1 ? 's' : ''}`);
+    io.to(game.roomId).emit('blockersDeclared', { playerName: player.playerName, blockerIds });
   });
 
   // ─── Disconnect ───────────────────────────────────────────────────────────────

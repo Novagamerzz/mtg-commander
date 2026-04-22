@@ -28,6 +28,8 @@ export interface GameCard {
   imageUri: string;
   typeLine: string;
   tapped: boolean;
+  power?: string;
+  toughness?: string;
   faceDown?: boolean;
   counters?: Record<string, number>;
   powerOverride?: string | null;
@@ -40,6 +42,8 @@ export interface DeckCardData {
   imageUri: string;
   typeLine: string;
   oracleText: string;
+  power?: string;
+  toughness?: string;
   quantity: number;
   isCommander: boolean;
 }
@@ -123,6 +127,7 @@ export interface ServerToClientEvents {
   'player:joined': (player: Player) => void;
   'player:left': (playerId: string) => void;
   'chat:message': (payload: ChatMessage) => void;
+  'blockersDeclared': (data: { playerName: string; blockerIds: string[] }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -171,4 +176,5 @@ export interface ClientToServerEvents {
   'game:join': (payload: { gameId: string; playerName: string }) => void;
   'player:update_life': (payload: { delta: number }) => void;
   'chat:send': (message: string) => void;
+  'game:declare_blockers': (payload: { blockerIds: string[] }) => void;
 }

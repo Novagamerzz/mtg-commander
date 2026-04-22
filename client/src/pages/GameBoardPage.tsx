@@ -636,6 +636,39 @@ function CounterBadge({ type, count }: { type: string; count: number }) {
   );
 }
 
+// ── P/T bar ───────────────────────────────────────────────────────────────────
+
+function PtBar({ card }: { card: GameCard }) {
+  const isCreature = (card.typeLine ?? '').includes('Creature');
+  if (!isCreature) return null;
+  const basePow = card.powerOverride ?? card.power ?? null;
+  const baseTou = card.toughnessOverride ?? card.toughness ?? null;
+  if (basePow === null && baseTou === null) return null;
+  const pp = card.counters?.['+1/+1'] ?? 0;
+  const mm = card.counters?.['-1/-1'] ?? 0;
+  const delta = pp - mm;
+  const fmt = (base: string | null) => {
+    if (base === null) return '?';
+    const n = parseInt(base, 10);
+    return isNaN(n) ? base : String(Math.max(0, n + delta));
+  };
+  return (
+    <div style={{
+      position: 'absolute', bottom: 0, left: 0, right: 0, height: 17,
+      background: 'rgba(0,0,0,0.86)', borderRadius: '0 0 6px 6px',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      gap: 2, zIndex: 20, pointerEvents: 'none',
+      fontSize: 10, fontWeight: 800, color: '#f1f5f9',
+    }}>
+      <span style={{ fontSize: 8, lineHeight: 1 }}>⚔</span>
+      <span>{fmt(basePow)}</span>
+      <span style={{ opacity: 0.35, fontSize: 9 }}>/</span>
+      <span style={{ fontSize: 8, lineHeight: 1 }}>🛡</span>
+      <span>{fmt(baseTou)}</span>
+    </div>
+  );
+}
+
 // ── My battlefield card ───────────────────────────────────────────────────────
 
 function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommander, onReturnHand,
@@ -664,7 +697,6 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
 
   const counters = card.counters ?? {};
   const hasCounters = Object.values(counters).some((n) => n > 0);
-  const hasPtOverride = card.powerOverride != null || card.toughnessOverride != null;
 
   function openMenu() { setMenuMode('main'); onHoverEnd(); }
   function closeMenu() { setMenuMode(null); }
@@ -726,15 +758,8 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
         </div>
       )}
 
-      {/* P/T override badge — bottom-right */}
-      {hasPtOverride && (
-        <div style={{ position: 'absolute', bottom: 4, right: 3, zIndex: 15, pointerEvents: 'none',
-          background: 'rgba(0,0,0,0.88)', color: '#f1f5f9', borderRadius: 4,
-          padding: '1px 5px', fontSize: 10, fontWeight: 800,
-          border: '1px solid rgba(255,255,255,0.35)' }}>
-          {card.powerOverride ?? '?'}/{card.toughnessOverride ?? '?'}
-        </div>
-      )}
+      {/* P/T bar */}
+      <PtBar card={card} />
 
       {/* ⋮ button */}
       <button
@@ -941,27 +966,32 @@ interface CRow {
 
 const FAN_GAP = 22; // px gap between fanned same-name cards
 
-function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS): CRow[] {
+function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zoneW = CANVAS_W - 40): CRow[] {
   const out: CRow[] = [];
   let ry = 0;
   for (const { label, cards: rc, isLand } of groupByType(cards, rowDefs)) {
-    // Group by name for fan stacking
     const nameMap = new Map<string, GameCard[]>();
     for (const c of rc) {
       const arr = nameMap.get(c.name) ?? [];
       arr.push(c);
       nameMap.set(c.name, arr);
     }
-    // Size cards based on number of groups (unique names) to avoid overcrowding
     const groupCount = nameMap.size;
     const { cW, cH } = cardSizeForRow(groupCount, isLand);
     const slots: CRow['slots'] = [];
-    let x = C_LBLW;
-    for (const [, group] of nameMap) {
-      for (let gi = 0; gi < group.length; gi++) {
-        slots.push({ id: group[gi].instanceId, groupSize: group.length, groupIndex: gi, x: x + gi * FAN_GAP });
+    if (groupCount > 0) {
+      const availW = zoneW - C_LBLW - 8;
+      const minSpacing = cW + C_HGAP;
+      const spacing = groupCount > 1
+        ? Math.max(minSpacing, Math.floor(availW / groupCount))
+        : minSpacing;
+      let x = C_LBLW;
+      for (const [, group] of nameMap) {
+        for (let gi = 0; gi < group.length; gi++) {
+          slots.push({ id: group[gi].instanceId, groupSize: group.length, groupIndex: gi, x: x + gi * FAN_GAP });
+        }
+        x += spacing;
       }
-      x += cW + C_HGAP;
     }
     out.push({ label, isLand, y: ry, cW, cH, slots });
     ry += cH + C_RGAP;
@@ -1142,6 +1172,7 @@ function ZoneHeader({ player, color, isMonarch }: { player: PersonalPlayerState;
 interface TableCanvasProps {
   me: PersonalPlayerState;
   opponents: PersonalPlayerState[];
+  isDefendingPhase: boolean;
   onTapCard: (id: string) => void;
   onGraveyardCard: (id: string) => void;
   onExileCard: (id: string) => void;
@@ -1166,18 +1197,21 @@ interface TableCanvasProps {
 }
 
 function TableCanvas({
-  me, opponents,
+  me, opponents, isDefendingPhase,
   onTapCard, onGraveyardCard, onExileCard, onReturnCmdCard, onReturnHandCard, onGiveControl, onDragStartCard,
   onPlayCard, onHover, onHoverEnd, onBfCardHover, onUpdateCounter, onSetPt, onSetKeywords,
   onDropToGy, onDropToEx, onOpenGy, onOpenEx, gyCards, exCards, monarchSocketId,
 }: TableCanvasProps) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(0.4);
+  const [zoom, setZoom] = useState(0.72);
   const [overBf, setOverBf] = useState(false);
   const [overGy, setOverGy] = useState(false);
   const [overEx, setOverEx] = useState(false);
+  const [blockerIds, setBlockerIds] = useState<Set<string>>(new Set());
+  const [overBlockers, setOverBlockers] = useState(false);
+  const [blockersDeclared, setBlockersDeclared] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const cur = useRef({ pan: { x: 0, y: 0 }, zoom: 0.4 });
+  const cur = useRef({ pan: { x: 0, y: 0 }, zoom: 0.72 });
   cur.current = { pan, zoom };
 
   const activeOpponents = opponents.filter((p) => !p.eliminated);
@@ -1195,7 +1229,24 @@ function TableCanvas({
     setZoom(nz);
   }
 
-  useLayoutEffect(() => { fitTable(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const lay = tableLayout(activeOpponents.length);
+    const INITIAL_ZOOM = 0.72;
+    const zx = lay.my.x + lay.my.w / 2;
+    const zy = lay.my.y + lay.my.h / 2;
+    setPan({ x: rect.width / 2 - zx * INITIAL_ZOOM, y: rect.height / 2 - zy * INITIAL_ZOOM });
+    setZoom(INITIAL_ZOOM);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!isDefendingPhase) {
+      setBlockerIds(new Set());
+      setBlockersDeclared(false);
+    }
+  }, [isDefendingPhase]);
 
   // Attach non-passive wheel listener so we can preventDefault
   useEffect(() => {
@@ -1232,7 +1283,7 @@ function TableCanvas({
     window.addEventListener('mouseup', up);
   }
 
-  const myRows = buildCRows(me.battlefield);
+  const myRows = buildCRows(me.battlefield, TYPE_ROWS, layout.my.w);
   const myCardMap = new Map<string, GameCard>(me.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
   return (
@@ -1256,7 +1307,7 @@ function TableCanvas({
           // Zones above my zone (y < layout.my.y) are "top" zones — use mirrored row order
           const isTopZone = zone.y < layout.my.y;
           const rowDefs = isTopZone ? TYPE_ROWS_OPP : TYPE_ROWS;
-          const rows = buildCRows(player.battlefield, rowDefs);
+          const rows = buildCRows(player.battlefield, rowDefs, zone.w);
           const cardMap = new Map<string, GameCard>(player.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
           return (
@@ -1347,6 +1398,8 @@ function TableCanvas({
                             ))}
                           </div>
                         )}
+                        {/* P/T bar */}
+                        <PtBar card={card} />
                         {/* Stack count badge */}
                         {showBadge && (
                           <div style={{ position: 'absolute', top: -7, left: -7, zIndex: 30,
@@ -1457,7 +1510,8 @@ function TableCanvas({
                 if (!card) return null;
                 const showBadge = slot.groupSize > 1 && slot.groupIndex === slot.groupSize - 1;
                 return (
-                  <div key={slot.id} style={{ position: 'absolute', left: slot.x, top: MY_LABEL_H + row.y, zIndex: 2 + slot.groupIndex }}
+                  <div key={slot.id} style={{ position: 'absolute', left: slot.x, top: MY_LABEL_H + row.y, zIndex: 2 + slot.groupIndex,
+                    filter: blockerIds.has(slot.id) ? 'drop-shadow(0 0 6px rgba(239,68,68,0.9))' : 'none' }}
                     onMouseDown={e => e.stopPropagation()}>
                     {showBadge && (
                       <div style={{ position: 'absolute', top: -7, left: -7, zIndex: 30,
@@ -1488,6 +1542,62 @@ function TableCanvas({
               })}
             </React.Fragment>
           ))}
+
+          {/* ── Declare Blockers zone (during opponent's combat) ── */}
+          {isDefendingPhase && (
+            <div style={{
+              position: 'absolute', left: 14, right: 14, bottom: 80, height: 70,
+              border: blockersDeclared ? '2px solid rgba(134,239,172,0.7)' : '2px dashed rgba(239,68,68,0.7)',
+              borderRadius: 10, zIndex: 5,
+              background: overBlockers ? 'rgba(239,68,68,0.12)' : 'rgba(239,68,68,0.05)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '0 16px', gap: 12,
+              transition: 'background 0.15s',
+            }}
+              onDragOver={(e) => { e.preventDefault(); setOverBlockers(true); }}
+              onDragLeave={() => setOverBlockers(false)}
+              onDrop={(e) => {
+                e.preventDefault(); setOverBlockers(false);
+                try {
+                  const d: DragData = JSON.parse(e.dataTransfer.getData('application/json'));
+                  const card = me.battlefield.find(c => c.instanceId === d.instanceId);
+                  if (card && card.typeLine?.includes('Creature') && !card.tapped) {
+                    setBlockerIds(prev => new Set([...prev, d.instanceId]));
+                  }
+                } catch { /* */ }
+              }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: blockersDeclared ? '#86efac' : '#f87171', letterSpacing: 1 }}>
+                  {blockersDeclared ? '✓ BLOCKERS CONFIRMED' : '🛡 DECLARE BLOCKERS'}
+                </span>
+                <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.35)' }}>
+                  {blockerIds.size > 0 ? `${blockerIds.size} creature${blockerIds.size !== 1 ? 's' : ''} blocking` : 'Drag untapped creatures here'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {blockerIds.size > 0 && !blockersDeclared && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); socket.emit('game:declare_blockers', { blockerIds: [...blockerIds] }); setBlockersDeclared(true); }}
+                    onMouseDown={e => e.stopPropagation()}
+                    style={{ fontSize: 11, fontWeight: 800, padding: '5px 14px', borderRadius: 7,
+                      background: 'rgba(239,68,68,0.25)', border: '1px solid rgba(239,68,68,0.6)',
+                      color: '#fca5a5', cursor: 'pointer' }}>
+                    Confirm Blockers
+                  </button>
+                )}
+                {blockerIds.size > 0 && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setBlockerIds(new Set()); setBlockersDeclared(false); }}
+                    onMouseDown={e => e.stopPropagation()}
+                    style={{ fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 7,
+                      background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)',
+                      color: '#94a3b8', cursor: 'pointer' }}>
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* ── Graveyard + Exile drop zones ── */}
           <div style={{ position: 'absolute', bottom: 14, right: 14, display: 'flex', gap: 14, zIndex: 4 }}
@@ -1871,6 +1981,11 @@ export default function GameBoardPage() {
       if (announcementTimer.current) clearTimeout(announcementTimer.current);
       announcementTimer.current = setTimeout(() => setAnnouncement(null), 6000);
     });
+    socket.on('blockersDeclared', ({ playerName, blockerIds }) => {
+      setTimingToast(`🛡 ${playerName} declared ${blockerIds.length} blocker${blockerIds.length !== 1 ? 's' : ''}`);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setTimingToast(null), 4000);
+    });
     socket.on('cardCounterUpdate', ({ playerId, instanceId, counters }) => {
       setGameState((prev) => {
         if (!prev) return prev;
@@ -1897,6 +2012,7 @@ export default function GameBoardPage() {
       socket.off('game:dice_result');
       socket.off('game:error');
       socket.off('game:announcement');
+      socket.off('blockersDeclared');
       socket.off('cardCounterUpdate');
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (announcementTimer.current) clearTimeout(announcementTimer.current);
@@ -2167,6 +2283,7 @@ export default function GameBoardPage() {
         <TableCanvas
           me={me}
           opponents={opponents}
+          isDefendingPhase={!isMyTurn && gameState.phase === 'combat'}
           onTapCard={emit.tapCard}
           onGraveyardCard={interceptGraveyard}
           onExileCard={interceptExile}
