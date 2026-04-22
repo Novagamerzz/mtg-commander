@@ -1197,34 +1197,56 @@ function TableCanvas({
   const [overBlockers, setOverBlockers] = useState(false);
   const [blockersDeclared, setBlockersDeclared] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const zoomRef = useRef(1.0);
-  zoomRef.current = zoom;
+  const panRef = useRef<{ x: number; y: number; sl: number; st: number } | null>(null);
 
   const activeOpponents = opponents.filter((p) => !p.eliminated);
   const layout = tableLayout(activeOpponents.length);
   const myColor = ZONE_COLORS[0];
+  const MIN_ZOOM = 60 / C_W_BASE;
 
-  // Ctrl+Wheel zooms card size; plain wheel scrolls natively
+  // Mouse wheel always zooms (pinch-to-zoom on trackpad also fires wheel with ctrlKey)
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey) return;
       e.preventDefault();
-      const factor = Math.exp(-e.deltaY * 0.005);
-      setZoom(prev => Math.max(60 / C_W_BASE, Math.min(2.0, prev * factor)));
+      const delta = e.ctrlKey ? e.deltaY * 0.01 : e.deltaY * 0.003;
+      const factor = Math.exp(-delta);
+      setZoom(prev => Math.max(MIN_ZOOM, Math.min(2.0, prev * factor)));
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Scroll so my zone is visible
+  // Drag empty board space to pan
+  function onBgDown(e: React.MouseEvent) {
+    if (e.button !== 0) return;
+    const el = viewportRef.current;
+    if (!el) return;
+    panRef.current = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop };
+    el.style.cursor = 'grabbing';
+    const mv = (ev: MouseEvent) => {
+      if (!panRef.current) return;
+      el.scrollLeft = panRef.current.sl - (ev.clientX - panRef.current.x);
+      el.scrollTop  = panRef.current.st - (ev.clientY - panRef.current.y);
+    };
+    const up = () => {
+      panRef.current = null;
+      if (el) el.style.cursor = 'grab';
+      window.removeEventListener('mousemove', mv);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('mouseup', up);
+  }
+
+  // Scroll so my zone is visible on load
   function scrollToMyZone() {
     const el = viewportRef.current;
     if (!el) return;
     const lay = tableLayout(activeOpponents.length);
     el.scrollLeft = Math.max(0, lay.my.x - 20);
-    el.scrollTop = Math.max(0, lay.my.y - 20);
+    el.scrollTop  = Math.max(0, lay.my.y - 20);
   }
 
   useLayoutEffect(() => {
@@ -1250,7 +1272,9 @@ function TableCanvas({
   const myCardMap = new Map<string, GameCard>(me.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
   return (
-    <div ref={viewportRef} className="relative w-full h-full" style={{ overflow: 'auto' }}>
+    <div ref={viewportRef} className="relative w-full h-full"
+      style={{ overflow: 'auto', cursor: 'grab', userSelect: 'none' }}
+      onMouseDown={onBgDown}>
 
       {/* ── Table canvas — full size, scrollable ── */}
       <div style={{ position: 'relative', width: CANVAS_W, height: CANVAS_H }}>
@@ -1620,28 +1644,75 @@ function TableCanvas({
         </div>
       </div>
 
-      {/* ── HUD (sticky over canvas) ── */}
-      <div className="sticky bottom-3 right-3 z-10 flex items-center gap-2 pointer-events-none"
-        style={{ float: 'right', marginRight: 12, marginBottom: 12 }}>
-        <span className="text-[9px] font-mono" style={{ color: 'rgba(255,255,255,0.35)' }}>
-          {Math.round(zoom * 100)}%
-        </span>
-        <button
-          className="pointer-events-auto text-[9px] font-bold px-2 py-1 rounded-lg transition hover:bg-white/10"
-          style={{ color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.12)',
-            background: 'rgba(0,0,0,0.5)' }}
-          onClick={e => { e.stopPropagation(); setZoom(1.0); }}
-          onMouseDown={e => e.stopPropagation()}>
-          100%
-        </button>
-        <button
-          className="pointer-events-auto text-[9px] font-bold px-2 py-1 rounded-lg transition hover:bg-white/10"
-          style={{ color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.12)',
-            background: 'rgba(0,0,0,0.5)' }}
-          onClick={e => { e.stopPropagation(); scrollToMyZone(); }}
-          onMouseDown={e => e.stopPropagation()}>
-          ⊡ My Zone
-        </button>
+      {/* ── Zoom widget — fixed to viewport corner, unaffected by pan ── */}
+      <div style={{
+        position: 'fixed', bottom: 14, right: 14, zIndex: 9999,
+        display: 'flex', flexDirection: 'column', gap: 8,
+        background: 'rgba(8,11,20,0.93)', backdropFilter: 'blur(10px)',
+        border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14,
+        padding: '12px 14px', minWidth: 172,
+        boxShadow: '0 8px 32px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.05)',
+        cursor: 'default',
+      }} onMouseDown={e => e.stopPropagation()}>
+
+        {/* Header row */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5,
+            color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase' }}>Card Size</span>
+          <span style={{ fontSize: 13, fontWeight: 900, color: '#f1f5f9', fontFamily: 'monospace' }}>
+            {Math.round(zoom * 100)}%
+          </span>
+        </div>
+
+        {/* −  slider  + */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {[{ label: '−', delta: -0.1 }, { label: '+', delta: 0.1 }].slice(0, 1).map(() => (
+            <button key="minus"
+              onClick={() => setZoom(prev => Math.max(MIN_ZOOM, Math.round((prev - 0.1) * 100) / 100))}
+              style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0, cursor: 'pointer',
+                background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.14)',
+                color: '#d1d5db', fontSize: 16, fontWeight: 700, lineHeight: 1,
+                display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              −
+            </button>
+          ))}
+          <input
+            type="range"
+            min={Math.round(MIN_ZOOM * 100)}
+            max={200}
+            step={1}
+            value={Math.round(zoom * 100)}
+            onChange={e => setZoom(Number(e.target.value) / 100)}
+            style={{ flex: 1, accentColor: '#4ade80', cursor: 'pointer', height: 4 }}
+          />
+          <button
+            onClick={() => setZoom(prev => Math.min(2.0, Math.round((prev + 0.1) * 100) / 100))}
+            style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0, cursor: 'pointer',
+              background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.14)',
+              color: '#d1d5db', fontSize: 16, fontWeight: 700, lineHeight: 1,
+              display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            +
+          </button>
+        </div>
+
+        {/* Reset / My Zone */}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            onClick={() => setZoom(1.0)}
+            style={{ flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 7,
+              cursor: 'pointer', background: zoom === 1.0 ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.06)',
+              border: zoom === 1.0 ? '1px solid rgba(74,222,128,0.4)' : '1px solid rgba(255,255,255,0.11)',
+              color: zoom === 1.0 ? '#86efac' : '#9ca3af' }}>
+            Reset
+          </button>
+          <button
+            onClick={scrollToMyZone}
+            style={{ flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 7,
+              cursor: 'pointer', background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.11)', color: '#9ca3af' }}>
+            ⊡ My Zone
+          </button>
+        </div>
       </div>
     </div>
   );
