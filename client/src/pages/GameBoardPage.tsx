@@ -919,8 +919,12 @@ const C_LW_BASE = 112, C_LH_BASE = 157; // lands slightly smaller
 const C_HGAP = 4, C_RGAP = 16;
 const C_LBLW = 80;
 
-function cardSizeForZone(_groupCount: number, isLand: boolean, _zoneW: number): { cW: number; cH: number } {
-  return isLand ? { cW: C_LW_BASE, cH: C_LH_BASE } : { cW: C_W_BASE, cH: C_H_BASE };
+function cardSizeForZone(_groupCount: number, isLand: boolean, _zoneW: number, zoom = 1): { cW: number; cH: number } {
+  const baseW = isLand ? C_LW_BASE : C_W_BASE;
+  const baseH = isLand ? C_LH_BASE : C_H_BASE;
+  const cW = Math.max(60, Math.round(baseW * zoom));
+  const cH = Math.round(baseH * zoom);
+  return { cW, cH };
 }
 
 // Zone colors: [me, op1, op2, op3]
@@ -953,7 +957,10 @@ interface CRow {
 
 const FAN_GAP = 22; // px gap between fanned same-name cards
 
-function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zoneW = CANVAS_W - 40): CRow[] {
+function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zoneW = CANVAS_W - 40, zoom = 1): CRow[] {
+  const gap  = Math.round(C_HGAP * zoom);
+  const rgap = Math.round(C_RGAP * zoom);
+  const fanGap = Math.round(FAN_GAP * zoom);
   const out: CRow[] = [];
   let ry = 0;
   for (const { label, cards: rc, isLand } of groupByType(cards, rowDefs)) {
@@ -964,17 +971,17 @@ function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zo
       nameMap.set(c.name, arr);
     }
     const groupCount = nameMap.size;
-    const { cW, cH } = cardSizeForZone(groupCount, isLand, zoneW);
+    const { cW, cH } = cardSizeForZone(groupCount, isLand, zoneW, zoom);
     const slots: CRow['slots'] = [];
     let x = C_LBLW;
     for (const [, group] of nameMap) {
       for (let gi = 0; gi < group.length; gi++) {
-        slots.push({ id: group[gi].instanceId, groupSize: group.length, groupIndex: gi, x: x + gi * FAN_GAP });
+        slots.push({ id: group[gi].instanceId, groupSize: group.length, groupIndex: gi, x: x + gi * fanGap });
       }
-      x += cW + C_HGAP;
+      x += cW + gap;
     }
     out.push({ label, isLand, y: ry, cW, cH, slots });
-    ry += cH + C_RGAP;
+    ry += cH + rgap;
   }
   return out;
 }
@@ -1182,6 +1189,7 @@ function TableCanvas({
   onPlayCard, onHover, onHoverEnd, onBfCardHover, onUpdateCounter, onSetPt, onSetKeywords,
   onDropToGy, onDropToEx, onOpenGy, onOpenEx, gyCards, exCards, monarchSocketId,
 }: TableCanvasProps) {
+  const [zoom, setZoom] = useState(1.0);
   const [overBf, setOverBf] = useState(false);
   const [overGy, setOverGy] = useState(false);
   const [overEx, setOverEx] = useState(false);
@@ -1189,10 +1197,26 @@ function TableCanvas({
   const [overBlockers, setOverBlockers] = useState(false);
   const [blockersDeclared, setBlockersDeclared] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const zoomRef = useRef(1.0);
+  zoomRef.current = zoom;
 
   const activeOpponents = opponents.filter((p) => !p.eliminated);
   const layout = tableLayout(activeOpponents.length);
   const myColor = ZONE_COLORS[0];
+
+  // Ctrl+Wheel zooms card size; plain wheel scrolls natively
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const factor = Math.exp(-e.deltaY * 0.005);
+      setZoom(prev => Math.max(60 / C_W_BASE, Math.min(2.0, prev * factor)));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
   // Scroll so my zone is visible
   function scrollToMyZone() {
@@ -1214,11 +1238,15 @@ function TableCanvas({
     }
   }, [isDefendingPhase]);
 
+  // Derived card dimensions at current zoom
+  const cardW = Math.max(60, Math.round(C_W_BASE * zoom));
+  const cardH = Math.round(C_H_BASE * zoom);
+
   const blockerIdSet = new Set(blockerCards.map(c => c.instanceId));
-  const BLOCK_ZONE_H = C_H_BASE + 44;
+  const BLOCK_ZONE_H = cardH + 44;
   const rowBaseY = MY_LABEL_H + (isDefendingPhase ? BLOCK_ZONE_H + 8 : 0);
   const battlefieldMinusBlockers = me.battlefield.filter(c => !blockerIdSet.has(c.instanceId));
-  const myRows = buildCRows(battlefieldMinusBlockers, TYPE_ROWS, layout.my.w);
+  const myRows = buildCRows(battlefieldMinusBlockers, TYPE_ROWS, layout.my.w, zoom);
   const myCardMap = new Map<string, GameCard>(me.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
   return (
@@ -1233,7 +1261,7 @@ function TableCanvas({
           if (!zone) return null;
           const color = ZONE_COLORS[(i + 1) % ZONE_COLORS.length];
           // Zones above my zone (y < layout.my.y) are "top" zones — use mirrored row order
-          const rows = buildCRows(player.battlefield, TYPE_ROWS_OPP, zone.w);
+          const rows = buildCRows(player.battlefield, TYPE_ROWS_OPP, zone.w, zoom);
           const cardMap = new Map<string, GameCard>(player.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
           return (
@@ -1541,7 +1569,7 @@ function TableCanvas({
                       setBlockerCards(prev => prev.filter(c => c.instanceId !== card.instanceId));
                       onGraveyardCard(card.instanceId);
                     }}>
-                    <TappedCardWrapper card={card} cardW={C_W_BASE} cardH={C_H_BASE}>
+                    <TappedCardWrapper card={card} cardW={cardW} cardH={cardH}>
                       <div className="w-full h-full">
                         {card.faceDown ? (
                           <div className="w-full h-full rounded-lg flex items-center justify-center"
@@ -1595,6 +1623,17 @@ function TableCanvas({
       {/* ── HUD (sticky over canvas) ── */}
       <div className="sticky bottom-3 right-3 z-10 flex items-center gap-2 pointer-events-none"
         style={{ float: 'right', marginRight: 12, marginBottom: 12 }}>
+        <span className="text-[9px] font-mono" style={{ color: 'rgba(255,255,255,0.35)' }}>
+          {Math.round(zoom * 100)}%
+        </span>
+        <button
+          className="pointer-events-auto text-[9px] font-bold px-2 py-1 rounded-lg transition hover:bg-white/10"
+          style={{ color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.12)',
+            background: 'rgba(0,0,0,0.5)' }}
+          onClick={e => { e.stopPropagation(); setZoom(1.0); }}
+          onMouseDown={e => e.stopPropagation()}>
+          100%
+        </button>
         <button
           className="pointer-events-auto text-[9px] font-bold px-2 py-1 rounded-lg transition hover:bg-white/10"
           style={{ color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.12)',
