@@ -1196,6 +1196,9 @@ function TableCanvas({
   // Stable ref so wheel / pan handlers always see current zoom+pan without stale closures
   const camRef = useRef({ zoom: 0.7, pan: { x: 0, y: 0 } });
   camRef.current = { zoom, pan };
+  // Ref so the wheel handler can read popup state without stale closure
+  const popupOpenRef = useRef(false);
+  popupOpenRef.current = showZoomPanel;
 
   const activeOpponents = opponents.filter((p) => !p.eliminated);
   const layout = tableLayout(activeOpponents.length);
@@ -1216,15 +1219,26 @@ function TableCanvas({
     setZoom(z);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Wheel: plain scroll pans, Ctrl/Cmd zooms centered on mouse ───────────────
+  // ── Wheel: behaviour depends on whether the zoom popup is open ───────────────
+  // Popup CLOSED → plain wheel pans, Ctrl/Cmd+wheel zooms camera (centered on cursor)
+  // Popup OPEN   → wheel adjusts zoom level (same effect as the slider), no panning
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const { zoom: z, pan: p } = camRef.current;
-      if (e.ctrlKey || e.metaKey) {
-        // Zoom centered on cursor
+      if (popupOpenRef.current) {
+        // Adjust zoom centered on viewport centre (same as slider/+/- buttons)
+        const factor = Math.exp(-e.deltaY * 0.005);
+        const nz = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z * factor));
+        const rect = el.getBoundingClientRect();
+        const cx = rect.width / 2, cy = rect.height / 2;
+        const s  = nz / z;
+        setPan({ x: cx - s * (cx - p.x), y: cy - s * (cy - p.y) });
+        setZoom(nz);
+      } else if (e.ctrlKey || e.metaKey) {
+        // Camera zoom centred on cursor
         const rect = el.getBoundingClientRect();
         const ox = e.clientX - rect.left;
         const oy = e.clientY - rect.top;
