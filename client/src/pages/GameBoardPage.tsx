@@ -919,12 +919,8 @@ const C_LW_BASE = 112, C_LH_BASE = 157; // lands slightly smaller
 const C_HGAP = 4, C_RGAP = 16;
 const C_LBLW = 80;
 
-function cardSizeForZone(_groupCount: number, isLand: boolean, _zoneW: number, zoom = 1): { cW: number; cH: number } {
-  const baseW = isLand ? C_LW_BASE : C_W_BASE;
-  const baseH = isLand ? C_LH_BASE : C_H_BASE;
-  const cW = Math.max(60, Math.round(baseW * zoom));
-  const cH = Math.round(baseH * zoom);
-  return { cW, cH };
+function cardSizeForZone(_groupCount: number, isLand: boolean, _zoneW: number): { cW: number; cH: number } {
+  return isLand ? { cW: C_LW_BASE, cH: C_LH_BASE } : { cW: C_W_BASE, cH: C_H_BASE };
 }
 
 // Zone colors: [me, op1, op2, op3]
@@ -957,10 +953,8 @@ interface CRow {
 
 const FAN_GAP = 22; // px gap between fanned same-name cards
 
-function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zoneW = CANVAS_W - 40, zoom = 1): CRow[] {
-  const gap  = Math.round(C_HGAP * zoom);
-  const rgap = Math.round(C_RGAP * zoom);
-  const fanGap = Math.round(FAN_GAP * zoom);
+function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zoneW = CANVAS_W - 40): CRow[] {
+  const gap = C_HGAP, rgap = C_RGAP, fanGap = FAN_GAP;
   const out: CRow[] = [];
   let ry = 0;
   for (const { label, cards: rc, isLand } of groupByType(cards, rowDefs)) {
@@ -971,7 +965,7 @@ function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zo
       nameMap.set(c.name, arr);
     }
     const groupCount = nameMap.size;
-    const { cW, cH } = cardSizeForZone(groupCount, isLand, zoneW, zoom);
+    const { cW, cH } = cardSizeForZone(groupCount, isLand, zoneW);
     const slots: CRow['slots'] = [];
     let x = C_LBLW;
     for (const [, group] of nameMap) {
@@ -1189,59 +1183,77 @@ function TableCanvas({
   onPlayCard, onHover, onHoverEnd, onBfCardHover, onUpdateCounter, onSetPt, onSetKeywords,
   onDropToGy, onDropToEx, onOpenGy, onOpenEx, gyCards, exCards, monarchSocketId,
 }: TableCanvasProps) {
-  const [zoom, setZoom] = useState(1.0);
+  const [zoom, setZoom]           = useState(0.7);
+  const [pan,  setPan]            = useState({ x: 0, y: 0 });
   const [showZoomPanel, setShowZoomPanel] = useState(false);
-  const [overBf, setOverBf] = useState(false);
-  const [overGy, setOverGy] = useState(false);
-  const [overEx, setOverEx] = useState(false);
+  const [overBf, setOverBf]       = useState(false);
+  const [overGy, setOverGy]       = useState(false);
+  const [overEx, setOverEx]       = useState(false);
   const [blockerCards, setBlockerCards] = useState<GameCard[]>([]);
   const [overBlockers, setOverBlockers] = useState(false);
   const [blockersDeclared, setBlockersDeclared] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const panRef = useRef<{ x: number; y: number; sl: number; st: number } | null>(null);
+  // Stable ref so wheel / pan handlers always see current zoom+pan without stale closures
+  const camRef = useRef({ zoom: 0.7, pan: { x: 0, y: 0 } });
+  camRef.current = { zoom, pan };
 
   const activeOpponents = opponents.filter((p) => !p.eliminated);
   const layout = tableLayout(activeOpponents.length);
   const myColor = ZONE_COLORS[0];
-  const MIN_ZOOM = 60 / C_W_BASE;
+  const MIN_ZOOM = 0.3;
+  const MAX_ZOOM = 2.0;
 
-  // Ctrl/Cmd+wheel → zoom; Shift+wheel → pan left/right; plain wheel → pan up/down
-  // Trackpad pinch fires as ctrlKey+wheel, so that also zooms.
+  // ── Initial position: center my zone at 70% zoom ─────────────────────────────
+  useLayoutEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const lay  = tableLayout(activeOpponents.length);
+    const z    = 0.7;
+    const cx   = lay.my.x + lay.my.w / 2;
+    const cy   = lay.my.y + lay.my.h / 2;
+    setPan({ x: rect.width  / 2 - cx * z, y: rect.height / 2 - cy * z });
+    setZoom(z);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Wheel: plain scroll pans, Ctrl/Cmd zooms centered on mouse ───────────────
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      const { zoom: z, pan: p } = camRef.current;
       if (e.ctrlKey || e.metaKey) {
-        // Zoom
-        const factor = Math.exp(-e.deltaY * 0.01);
-        setZoom(prev => Math.max(MIN_ZOOM, Math.min(2.0, prev * factor)));
-      } else if (e.shiftKey) {
-        el.scrollLeft += e.deltaY;
+        // Zoom centered on cursor
+        const rect = el.getBoundingClientRect();
+        const ox = e.clientX - rect.left;
+        const oy = e.clientY - rect.top;
+        const factor = Math.exp(-e.deltaY * 0.005);
+        const nz = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z * factor));
+        const s  = nz / z;
+        setPan({ x: ox - s * (ox - p.x), y: oy - s * (oy - p.y) });
+        setZoom(nz);
       } else {
-        el.scrollTop  += e.deltaY;
-        el.scrollLeft += e.deltaX;
+        // Pan
+        setPan({ x: p.x - e.deltaX, y: p.y - e.deltaY });
       }
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Drag empty board space to pan
+  // ── Drag empty space to pan ───────────────────────────────────────────────────
   function onBgDown(e: React.MouseEvent) {
     if (e.button !== 0) return;
+    e.preventDefault();
     const el = viewportRef.current;
     if (!el) return;
-    panRef.current = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop };
+    const p0 = { ...camRef.current.pan };
+    const m0 = { x: e.clientX, y: e.clientY };
     el.style.cursor = 'grabbing';
-    const mv = (ev: MouseEvent) => {
-      if (!panRef.current) return;
-      el.scrollLeft = panRef.current.sl - (ev.clientX - panRef.current.x);
-      el.scrollTop  = panRef.current.st - (ev.clientY - panRef.current.y);
-    };
+    const mv = (ev: MouseEvent) => setPan({ x: p0.x + ev.clientX - m0.x, y: p0.y + ev.clientY - m0.y });
     const up = () => {
-      panRef.current = null;
-      if (el) el.style.cursor = 'grab';
+      el.style.cursor = 'grab';
       window.removeEventListener('mousemove', mv);
       window.removeEventListener('mouseup', up);
     };
@@ -1249,44 +1261,57 @@ function TableCanvas({
     window.addEventListener('mouseup', up);
   }
 
-  // Scroll so my zone is visible on load
-  function scrollToMyZone() {
+  // ── Widget zoom helpers (centered on viewport center) ─────────────────────────
+  function applyZoom(nz: number) {
     const el = viewportRef.current;
     if (!el) return;
-    const lay = tableLayout(activeOpponents.length);
-    el.scrollLeft = Math.max(0, lay.my.x - 20);
-    el.scrollTop  = Math.max(0, lay.my.y - 20);
+    const rect = el.getBoundingClientRect();
+    const { zoom: z, pan: p } = camRef.current;
+    const cx = rect.width / 2, cy = rect.height / 2;
+    const s  = nz / z;
+    setPan({ x: cx - s * (cx - p.x), y: cy - s * (cy - p.y) });
+    setZoom(nz);
   }
 
-  useLayoutEffect(() => {
-    scrollToMyZone();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  function resetView() {
+    const el = viewportRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const lay  = tableLayout(activeOpponents.length);
+    const z    = 0.7;
+    const cx   = lay.my.x + lay.my.w / 2;
+    const cy   = lay.my.y + lay.my.h / 2;
+    setPan({ x: rect.width  / 2 - cx * z, y: rect.height / 2 - cy * z });
+    setZoom(z);
+  }
 
   useEffect(() => {
-    if (!isDefendingPhase) {
-      setBlockerCards([]);
-      setBlockersDeclared(false);
-    }
+    if (!isDefendingPhase) { setBlockerCards([]); setBlockersDeclared(false); }
   }, [isDefendingPhase]);
 
-  // Derived card dimensions at current zoom
-  const cardW = Math.max(60, Math.round(C_W_BASE * zoom));
-  const cardH = Math.round(C_H_BASE * zoom);
+  // Card sizes are fixed — zoom applies to the whole board via CSS transform
+  const cardW = C_W_BASE;
+  const cardH = C_H_BASE;
 
   const blockerIdSet = new Set(blockerCards.map(c => c.instanceId));
   const BLOCK_ZONE_H = cardH + 44;
   const rowBaseY = MY_LABEL_H + (isDefendingPhase ? BLOCK_ZONE_H + 8 : 0);
   const battlefieldMinusBlockers = me.battlefield.filter(c => !blockerIdSet.has(c.instanceId));
-  const myRows = buildCRows(battlefieldMinusBlockers, TYPE_ROWS, layout.my.w, zoom);
+  const myRows    = buildCRows(battlefieldMinusBlockers, TYPE_ROWS, layout.my.w);
   const myCardMap = new Map<string, GameCard>(me.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
   return (
-    <div ref={viewportRef} className="relative w-full h-full"
-      style={{ overflow: 'auto', cursor: 'grab', userSelect: 'none' }}
+    <div ref={viewportRef} className="relative w-full h-full overflow-hidden"
+      style={{ cursor: 'grab', userSelect: 'none' }}
       onMouseDown={onBgDown}>
 
-      {/* ── Table canvas — full size, scrollable ── */}
-      <div style={{ position: 'relative', width: CANVAS_W, height: CANVAS_H }}>
+      {/* ── Board canvas — transformed for pan/zoom ── */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0,
+        width: CANVAS_W, height: CANVAS_H,
+        transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+        transformOrigin: '0 0',
+      }}>
 
         {/* Opponent zones */}
         {activeOpponents.map((player, i) => {
@@ -1294,7 +1319,7 @@ function TableCanvas({
           if (!zone) return null;
           const color = ZONE_COLORS[(i + 1) % ZONE_COLORS.length];
           // Zones above my zone (y < layout.my.y) are "top" zones — use mirrored row order
-          const rows = buildCRows(player.battlefield, TYPE_ROWS_OPP, zone.w, zoom);
+          const rows = buildCRows(player.battlefield, TYPE_ROWS_OPP, zone.w);
           const cardMap = new Map<string, GameCard>(player.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
           return (
@@ -1681,7 +1706,7 @@ function TableCanvas({
 
               {/* − slider + */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <button onClick={() => setZoom(p => Math.max(MIN_ZOOM, Math.round((p - 0.1) * 100) / 100))}
+                <button onClick={() => applyZoom(Math.max(MIN_ZOOM, Math.round((zoom - 0.1) * 100) / 100))}
                   style={{ width: 28, height: 28, borderRadius: 7, flexShrink: 0, cursor: 'pointer',
                     background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
                     color: '#d1d5db', fontSize: 18, fontWeight: 700, lineHeight: 1,
@@ -1690,9 +1715,9 @@ function TableCanvas({
                 </button>
                 <input type="range" min={Math.round(MIN_ZOOM * 100)} max={200} step={1}
                   value={Math.round(zoom * 100)}
-                  onChange={e => setZoom(Number(e.target.value) / 100)}
+                  onChange={e => applyZoom(Number(e.target.value) / 100)}
                   style={{ flex: 1, accentColor: '#4ade80', cursor: 'pointer' }} />
-                <button onClick={() => setZoom(p => Math.min(2.0, Math.round((p + 0.1) * 100) / 100))}
+                <button onClick={() => applyZoom(Math.min(MAX_ZOOM, Math.round((zoom + 0.1) * 100) / 100))}
                   style={{ width: 28, height: 28, borderRadius: 7, flexShrink: 0, cursor: 'pointer',
                     background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
                     color: '#d1d5db', fontSize: 18, fontWeight: 700, lineHeight: 1,
@@ -1703,15 +1728,15 @@ function TableCanvas({
 
               {/* Reset + My Zone */}
               <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={() => { setZoom(1.0); setShowZoomPanel(false); }}
+                <button onClick={() => { resetView(); setShowZoomPanel(false); }}
                   style={{ flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 7,
                     cursor: 'pointer',
-                    background: zoom === 1.0 ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.06)',
-                    border: zoom === 1.0 ? '1px solid rgba(74,222,128,0.4)' : '1px solid rgba(255,255,255,0.11)',
-                    color: zoom === 1.0 ? '#86efac' : '#9ca3af' }}>
+                    background: Math.round(zoom * 10) === 7 ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.06)',
+                    border: Math.round(zoom * 10) === 7 ? '1px solid rgba(74,222,128,0.4)' : '1px solid rgba(255,255,255,0.11)',
+                    color: Math.round(zoom * 10) === 7 ? '#86efac' : '#9ca3af' }}>
                   Reset
                 </button>
-                <button onClick={() => { scrollToMyZone(); setShowZoomPanel(false); }}
+                <button onClick={() => { resetView(); setShowZoomPanel(false); }}
                   style={{ flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 7,
                     cursor: 'pointer', background: 'rgba(255,255,255,0.06)',
                     border: '1px solid rgba(255,255,255,0.11)', color: '#9ca3af' }}>
