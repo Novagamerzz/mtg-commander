@@ -1182,8 +1182,6 @@ function TableCanvas({
   onPlayCard, onHover, onHoverEnd, onBfCardHover, onUpdateCounter, onSetPt, onSetKeywords,
   onDropToGy, onDropToEx, onOpenGy, onOpenEx, gyCards, exCards, monarchSocketId,
 }: TableCanvasProps) {
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(0.72);
   const [overBf, setOverBf] = useState(false);
   const [overGy, setOverGy] = useState(false);
   const [overEx, setOverEx] = useState(false);
@@ -1191,34 +1189,22 @@ function TableCanvas({
   const [overBlockers, setOverBlockers] = useState(false);
   const [blockersDeclared, setBlockersDeclared] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const cur = useRef({ pan: { x: 0, y: 0 }, zoom: 0.72 });
-  cur.current = { pan, zoom };
 
   const activeOpponents = opponents.filter((p) => !p.eliminated);
   const layout = tableLayout(activeOpponents.length);
   const myColor = ZONE_COLORS[0];
 
-  function fitTable() {
+  // Scroll so my zone is visible
+  function scrollToMyZone() {
     const el = viewportRef.current;
     if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const nz = Math.max(0.25, Math.min(1.5,
-      Math.min((rect.width - 32) / CANVAS_W, (rect.height - 32) / CANVAS_H)
-    ));
-    setPan({ x: (rect.width - CANVAS_W * nz) / 2, y: (rect.height - CANVAS_H * nz) / 2 });
-    setZoom(nz);
+    const lay = tableLayout(activeOpponents.length);
+    el.scrollLeft = Math.max(0, lay.my.x - 20);
+    el.scrollTop = Math.max(0, lay.my.y - 20);
   }
 
   useLayoutEffect(() => {
-    const el = viewportRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const lay = tableLayout(activeOpponents.length);
-    const z = 0.72;
-    const zx = lay.my.x + lay.my.w / 2;
-    const zy = lay.my.y + lay.my.h / 2;
-    setPan({ x: rect.width / 2 - zx * z, y: rect.height / 2 - zy * z });
-    // zoom stays at its initial value — no auto-fit
+    scrollToMyZone();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -1228,41 +1214,6 @@ function TableCanvas({
     }
   }, [isDefendingPhase]);
 
-  // Attach non-passive wheel listener so we can preventDefault
-  useEffect(() => {
-    const el = viewportRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const rect = el.getBoundingClientRect();
-      const ox = e.clientX - rect.left, oy = e.clientY - rect.top;
-      const { zoom: z, pan: p } = cur.current;
-      const factor = e.ctrlKey ? Math.exp(-e.deltaY * 0.008) : (e.deltaY < 0 ? 1.1 : 1 / 1.1);
-      const nz = Math.max(0.25, Math.min(1.5, z * factor));
-      const s = nz / z;
-      setZoom(nz);
-      setPan({ x: ox - s * (ox - p.x), y: oy - s * (oy - p.y) });
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, []);
-
-  function onBgDown(e: React.MouseEvent) {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    const p0 = { ...cur.current.pan };
-    const m0 = { x: e.clientX, y: e.clientY };
-    if (viewportRef.current) viewportRef.current.style.cursor = 'grabbing';
-    const mv = (ev: MouseEvent) => setPan({ x: p0.x + ev.clientX - m0.x, y: p0.y + ev.clientY - m0.y });
-    const up = () => {
-      if (viewportRef.current) viewportRef.current.style.cursor = 'grab';
-      window.removeEventListener('mousemove', mv);
-      window.removeEventListener('mouseup', up);
-    };
-    window.addEventListener('mousemove', mv);
-    window.addEventListener('mouseup', up);
-  }
-
   const blockerIdSet = new Set(blockerCards.map(c => c.instanceId));
   const BLOCK_ZONE_H = C_H_BASE + 44;
   const rowBaseY = MY_LABEL_H + (isDefendingPhase ? BLOCK_ZONE_H + 8 : 0);
@@ -1271,17 +1222,10 @@ function TableCanvas({
   const myCardMap = new Map<string, GameCard>(me.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
   return (
-    <div ref={viewportRef} className="relative w-full h-full overflow-hidden"
-      style={{ cursor: 'grab' }}
-      onMouseDown={onBgDown}>
+    <div ref={viewportRef} className="relative w-full h-full" style={{ overflow: 'auto' }}>
 
-      {/* ── Transformed table canvas ── */}
-      <div style={{
-        position: 'absolute', top: 0, left: 0,
-        transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-        transformOrigin: '0 0',
-        width: CANVAS_W, height: CANVAS_H,
-      }}>
+      {/* ── Table canvas — full size, scrollable ── */}
+      <div style={{ position: 'relative', width: CANVAS_W, height: CANVAS_H }}>
 
         {/* Opponent zones */}
         {activeOpponents.map((player, i) => {
@@ -1648,18 +1592,16 @@ function TableCanvas({
         </div>
       </div>
 
-      {/* ── HUD (fixed over canvas) ── */}
-      <div className="absolute bottom-3 right-3 z-10 flex items-center gap-2 pointer-events-none">
-        <span className="text-[9px] font-mono" style={{ color: 'rgba(255,255,255,0.22)' }}>
-          {Math.round(zoom * 100)}%
-        </span>
+      {/* ── HUD (sticky over canvas) ── */}
+      <div className="sticky bottom-3 right-3 z-10 flex items-center gap-2 pointer-events-none"
+        style={{ float: 'right', marginRight: 12, marginBottom: 12 }}>
         <button
           className="pointer-events-auto text-[9px] font-bold px-2 py-1 rounded-lg transition hover:bg-white/10"
           style={{ color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.12)',
             background: 'rgba(0,0,0,0.5)' }}
-          onClick={e => { e.stopPropagation(); fitTable(); }}
+          onClick={e => { e.stopPropagation(); scrollToMyZone(); }}
           onMouseDown={e => e.stopPropagation()}>
-          ⊡ Fit Table
+          ⊡ My Zone
         </button>
       </div>
     </div>
