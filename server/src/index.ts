@@ -475,6 +475,20 @@ io.on('connection', (socket) => {
   });
 
   socket.on('room:leave', () => {
+    // Intentional leave — clear userId mapping so player can't accidentally rejoin
+    const roomId = socketToRoom.get(socket.id);
+    if (roomId) {
+      const game = games.get(roomId);
+      if (game) {
+        const gp = game.players.find(p => p.socketId === socket.id);
+        if (gp) userIdToRoom.delete(gp.userId);
+      }
+      const room = rooms.get(roomId);
+      if (room) {
+        const rp = room.players.find(p => p.socketId === socket.id);
+        if (rp) userIdToRoom.delete(rp.userId);
+      }
+    }
     cleanupSocket(socket.id);
   });
 
@@ -498,6 +512,8 @@ io.on('connection', (socket) => {
             socketToRoom.delete(player.socketId);
             player.socketId = socket.id;
             socket.join(roomId);
+            appendLog(game, `${player.playerName} reconnected`);
+            io.to(game.roomId).emit('game:announcement', { message: `🔌 ${player.playerName} reconnected`, type: 'info' });
             console.log(`[game:rejoin] ${player.playerName} re-bound ${socket.id}`);
           }
         }
@@ -506,7 +522,7 @@ io.on('connection', (socket) => {
 
     const game = roomId ? games.get(roomId) : undefined;
     if (game) {
-      socket.emit('game:state', toPersonalState(game, socket.id));
+      broadcastGame(game);
     }
   });
 

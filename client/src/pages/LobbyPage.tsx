@@ -33,6 +33,22 @@ export default function LobbyPage() {
     };
   }, [navigate]);
 
+  // Auto-redirect if there is a fresh active game session (< 24h old)
+  const [activeSession, setActiveSession] = useState<{ roomId: string } | null>(null);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('mtg_session');
+      if (!raw) return;
+      const session = JSON.parse(raw);
+      const age = Date.now() - (session.timestamp ?? 0);
+      if (age < 24 * 60 * 60 * 1000 && session.roomId) {
+        setActiveSession({ roomId: session.roomId });
+      } else {
+        localStorage.removeItem('mtg_session');
+      }
+    } catch { localStorage.removeItem('mtg_session'); }
+  }, []);
+
   useEffect(() => {
     if (joinPrompt) setTimeout(() => joinInputRef.current?.focus(), 50);
   }, [joinPrompt]);
@@ -65,6 +81,26 @@ export default function LobbyPage() {
 
   return (
     <div className="min-h-screen p-6 max-w-3xl mx-auto flex flex-col gap-6">
+      {/* Active session banner */}
+      {activeSession && (
+        <div className="rounded-xl px-5 py-3 flex items-center justify-between"
+          style={{ background: 'rgba(250,204,21,0.1)', border: '1px solid rgba(250,204,21,0.3)' }}>
+          <span className="text-sm text-yellow-300 font-medium">🃏 You have an active game in progress</span>
+          <div className="flex gap-3">
+            <button
+              onClick={() => navigate(`/game/${activeSession.roomId}`)}
+              className="text-xs font-bold px-4 py-1.5 rounded-lg transition"
+              style={{ background: 'rgba(250,204,21,0.2)', border: '1px solid rgba(250,204,21,0.5)', color: '#fbbf24' }}>
+              Rejoin Game →
+            </button>
+            <button
+              onClick={() => { localStorage.removeItem('mtg_session'); setActiveSession(null); }}
+              className="text-xs text-gray-500 hover:text-gray-300 transition">
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

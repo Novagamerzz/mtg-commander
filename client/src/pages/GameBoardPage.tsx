@@ -1974,10 +1974,11 @@ function TokenCreateModal({ onClose, onCreate }: {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function GameBoardPage() {
-  const { roomId: _roomId } = useParams<{ roomId: string }>();
+  const { roomId = '' } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
   const [gameState, setGameState] = useState<PersonalGameState | null>(null);
+  const [rejoinFailed, setRejoinFailed] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [hoverCard, setHoverCard] = useState<GameCard | null>(null);
   const [mouse, setMouse] = useState({ x: 0, y: 0 });
@@ -2008,6 +2009,26 @@ export default function GameBoardPage() {
     cardName: string; instanceId: string; destination: 'graveyard' | 'exile';
   } | null>(null);
   const commanderScryfallId = useRef<string | null>(null);
+
+  // ── Session helpers ───────────────────────────────────────────────────────────
+  function saveSession() {
+    if (roomId && user?.id) {
+      localStorage.setItem('mtg_session', JSON.stringify({ roomId, userId: user.id, timestamp: Date.now() }));
+    }
+  }
+  function clearSession() {
+    localStorage.removeItem('mtg_session');
+  }
+
+  // Show failure UI after 7s if we still haven't received game state
+  useEffect(() => {
+    const t = setTimeout(() => setRejoinFailed(true), 7000);
+    return () => clearTimeout(t);
+  }, []);
+  // Clear failure flag as soon as game state arrives
+  useEffect(() => {
+    if (gameState) { setRejoinFailed(false); saveSession(); }
+  }, [gameState?.roomId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const userId = user?.id;
@@ -2132,10 +2153,33 @@ export default function GameBoardPage() {
   if (!gameState) {
     return (
       <div className="h-screen flex items-center justify-center" style={FELT}>
-        <div className="text-center">
-          <div className="w-12 h-12 rounded-full border-2 border-yellow-500/40 border-t-yellow-500 animate-spin mx-auto mb-4" />
-          <p className="text-gray-400 text-lg font-medium">Connecting to game…</p>
-        </div>
+        {!rejoinFailed ? (
+          <div className="text-center">
+            <div className="w-12 h-12 rounded-full border-2 border-yellow-500/40 border-t-yellow-500 animate-spin mx-auto mb-4" />
+            <p className="text-gray-400 text-lg font-medium">Reconnecting to game…</p>
+            <p className="text-gray-600 text-sm mt-2">Restoring your session</p>
+          </div>
+        ) : (
+          <div className="text-center flex flex-col items-center gap-4">
+            <p className="text-gray-300 text-xl font-semibold">Couldn't reconnect</p>
+            <p className="text-gray-500 text-sm">The game may have ended or the server restarted.</p>
+            <button
+              onClick={() => {
+                setRejoinFailed(false);
+                setTimeout(() => setRejoinFailed(true), 7000);
+                socket.emit('game:rejoin', { userId: user?.id });
+              }}
+              className="px-6 py-2.5 rounded-xl font-bold text-sm transition"
+              style={{ background: 'rgba(250,204,21,0.15)', border: '1px solid rgba(250,204,21,0.4)', color: '#fbbf24' }}>
+              🔄 Retry Rejoin
+            </button>
+            <button
+              onClick={() => { clearSession(); navigate('/lobby'); }}
+              className="text-gray-500 hover:text-gray-300 text-sm transition underline">
+              ← Return to Lobby
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -2151,7 +2195,7 @@ export default function GameBoardPage() {
     <div className="h-screen flex items-center justify-center" style={FELT}>
       <div className="text-center">
         <p className="text-gray-400 mb-3">Could not find your player.</p>
-        <button onClick={() => navigate('/lobby')} className="text-yellow-500 underline text-sm">← Back to lobby</button>
+        <button onClick={() => { clearSession(); navigate('/lobby'); }} className="text-yellow-500 underline text-sm">← Back to lobby</button>
       </div>
     </div>
   );
@@ -2326,7 +2370,7 @@ export default function GameBoardPage() {
               Concede
             </button>
           )}
-          <button onClick={() => navigate('/lobby')} className="text-xs px-2 py-1.5 transition hover:text-red-400"
+          <button onClick={() => { clearSession(); navigate('/lobby'); }} className="text-xs px-2 py-1.5 transition hover:text-red-400"
             style={{ color: '#4b5563' }}>✕</button>
         </div>
       </header>
@@ -2741,7 +2785,7 @@ export default function GameBoardPage() {
       {/* ── Concede popup ── */}
       {showConcedePopup && (
         <ConcedePopup
-          onConfirm={() => { emit.concede(); setShowConcedePopup(false); }}
+          onConfirm={() => { clearSession(); emit.concede(); setShowConcedePopup(false); }}
           onCancel={() => setShowConcedePopup(false)}
         />
       )}
