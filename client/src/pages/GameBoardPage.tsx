@@ -914,26 +914,24 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
 
 // ── Canvas layout helpers ─────────────────────────────────────────────────────
 
-const C_W_BASE = 140, C_H_BASE = 196;  // card base — 140px wide, 1.4 ratio
-const C_LW_BASE = 112, C_LH_BASE = 157; // lands slightly smaller
-const C_W_MIN = 88, C_H_MIN = 123;      // minimum when 8+ cards
-const C_LW_MIN = 72, C_LH_MIN = 101;
-const C_SCALE_THRESHOLD = 7;            // start scaling down past this many cards per row
-const C_HGAP = 12, C_RGAP = 20;
+const C_W_BASE = 120, C_H_BASE = 168;   // 120px wide, 1.4 ratio
+const C_LW_BASE = 96,  C_LH_BASE = 134; // lands slightly smaller
+const C_W_MIN = 60,   C_H_MIN = 84;     // never below 60px wide
+const C_LW_MIN = 48,  C_LH_MIN = 67;
+const C_HGAP = 4, C_RGAP = 16;         // tight 4px gap between cards
 const C_LBLW = 80;
 
-function cardSizeForRow(count: number, isLand: boolean): { cW: number; cH: number } {
+function cardSizeForZone(groupCount: number, isLand: boolean, zoneW: number): { cW: number; cH: number } {
   const baseW = isLand ? C_LW_BASE : C_W_BASE;
   const baseH = isLand ? C_LH_BASE : C_H_BASE;
   const minW  = isLand ? C_LW_MIN  : C_W_MIN;
-  const minH  = isLand ? C_LH_MIN  : C_H_MIN;
-  if (count <= C_SCALE_THRESHOLD) return { cW: baseW, cH: baseH };
-  // Linear scale-down from threshold to 2× threshold
-  const t = Math.min(1, (count - C_SCALE_THRESHOLD) / C_SCALE_THRESHOLD);
-  return {
-    cW: Math.round(baseW + (minW - baseW) * t),
-    cH: Math.round(baseH + (minH - baseH) * t),
-  };
+  if (groupCount === 0) return { cW: baseW, cH: baseH };
+  const availW = zoneW - C_LBLW - 8;
+  const fits = (groupCount * baseW + Math.max(0, groupCount - 1) * C_HGAP) <= availW;
+  if (fits) return { cW: baseW, cH: baseH };
+  // Scale down proportionally to fit, never below minW
+  const cW = Math.max(minW, Math.floor((availW - C_HGAP * Math.max(0, groupCount - 1)) / groupCount));
+  return { cW, cH: Math.round(cW * (baseH / baseW)) };
 }
 
 // Zone colors: [me, op1, op2, op3]
@@ -977,21 +975,14 @@ function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zo
       nameMap.set(c.name, arr);
     }
     const groupCount = nameMap.size;
-    const { cW, cH } = cardSizeForRow(groupCount, isLand);
+    const { cW, cH } = cardSizeForZone(groupCount, isLand, zoneW);
     const slots: CRow['slots'] = [];
-    if (groupCount > 0) {
-      const availW = zoneW - C_LBLW - 8;
-      const minSpacing = cW + C_HGAP;
-      const spacing = groupCount > 1
-        ? Math.max(minSpacing, Math.floor(availW / groupCount))
-        : minSpacing;
-      let x = C_LBLW;
-      for (const [, group] of nameMap) {
-        for (let gi = 0; gi < group.length; gi++) {
-          slots.push({ id: group[gi].instanceId, groupSize: group.length, groupIndex: gi, x: x + gi * FAN_GAP });
-        }
-        x += spacing;
+    let x = C_LBLW;
+    for (const [, group] of nameMap) {
+      for (let gi = 0; gi < group.length; gi++) {
+        slots.push({ id: group[gi].instanceId, groupSize: group.length, groupIndex: gi, x: x + gi * FAN_GAP });
       }
+      x += cW + C_HGAP;
     }
     out.push({ label, isLand, y: ry, cW, cH, slots });
     ry += cH + C_RGAP;
@@ -1234,11 +1225,11 @@ function TableCanvas({
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const lay = tableLayout(activeOpponents.length);
-    const INITIAL_ZOOM = 0.72;
+    const z = 0.72;
     const zx = lay.my.x + lay.my.w / 2;
     const zy = lay.my.y + lay.my.h / 2;
-    setPan({ x: rect.width / 2 - zx * INITIAL_ZOOM, y: rect.height / 2 - zy * INITIAL_ZOOM });
-    setZoom(INITIAL_ZOOM);
+    setPan({ x: rect.width / 2 - zx * z, y: rect.height / 2 - zy * z });
+    // zoom stays at its initial value — no auto-fit
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -1305,9 +1296,7 @@ function TableCanvas({
           if (!zone) return null;
           const color = ZONE_COLORS[(i + 1) % ZONE_COLORS.length];
           // Zones above my zone (y < layout.my.y) are "top" zones — use mirrored row order
-          const isTopZone = zone.y < layout.my.y;
-          const rowDefs = isTopZone ? TYPE_ROWS_OPP : TYPE_ROWS;
-          const rows = buildCRows(player.battlefield, rowDefs, zone.w);
+          const rows = buildCRows(player.battlefield, TYPE_ROWS_OPP, zone.w);
           const cardMap = new Map<string, GameCard>(player.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
           return (
@@ -1543,15 +1532,16 @@ function TableCanvas({
             </React.Fragment>
           ))}
 
-          {/* ── Declare Blockers zone (during opponent's combat) ── */}
+          {/* ── Declare Blockers strip (during opponent's combat) ── */}
           {isDefendingPhase && (
             <div style={{
-              position: 'absolute', left: 14, right: 14, bottom: 80, height: 70,
-              border: blockersDeclared ? '2px solid rgba(134,239,172,0.7)' : '2px dashed rgba(239,68,68,0.7)',
-              borderRadius: 10, zIndex: 5,
-              background: overBlockers ? 'rgba(239,68,68,0.12)' : 'rgba(239,68,68,0.05)',
+              position: 'absolute', left: 14, right: 14, top: MY_LABEL_H + 4, height: 44,
+              border: blockersDeclared ? '2px solid rgba(134,239,172,0.7)' : '2px dashed rgba(239,68,68,0.75)',
+              borderRadius: 8, zIndex: 10,
+              background: overBlockers ? 'rgba(239,68,68,0.15)' : 'rgba(239,68,68,0.06)',
+              boxShadow: blockersDeclared ? 'none' : '0 0 12px rgba(239,68,68,0.2)',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '0 16px', gap: 12,
+              padding: '0 14px', gap: 12,
               transition: 'background 0.15s',
             }}
               onDragOver={(e) => { e.preventDefault(); setOverBlockers(true); }}
@@ -1567,11 +1557,10 @@ function TableCanvas({
                 } catch { /* */ }
               }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <span style={{ fontSize: 10, fontWeight: 800, color: blockersDeclared ? '#86efac' : '#f87171', letterSpacing: 1 }}>
-                  {blockersDeclared ? '✓ BLOCKERS CONFIRMED' : '🛡 DECLARE BLOCKERS'}
-                </span>
-                <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.35)' }}>
-                  {blockerIds.size > 0 ? `${blockerIds.size} creature${blockerIds.size !== 1 ? 's' : ''} blocking` : 'Drag untapped creatures here'}
+                <span style={{ fontSize: 10, fontWeight: 800, color: blockersDeclared ? '#86efac' : '#f87171', letterSpacing: 0.8 }}>
+                  {blockersDeclared
+                    ? `✓ ${blockerIds.size} blocker${blockerIds.size !== 1 ? 's' : ''} confirmed`
+                    : `🛡 Drag creatures here to block${blockerIds.size > 0 ? ` — ${blockerIds.size} selected` : ''}`}
                 </span>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
