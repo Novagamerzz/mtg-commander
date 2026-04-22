@@ -479,25 +479,26 @@ function MillResultModal({ cards, onClose }: { cards: GameCard[]; onClose: () =>
 
 // ── Battlefield row organisation ──────────────────────────────────────────────
 
+// My mat (bottom): Creatures at top row (y=0 = closest to center gap) → ... → Lands at bottom row.
+// Other catches non-land leftovers; Lands is the true catch-all last row.
 const TYPE_ROWS: { label: string; match: (t: string) => boolean; isLand?: boolean }[] = [
   { label: 'Creatures',     match: (t) => t.includes('Creature') },
   { label: 'Artifacts',     match: (t) => !t.includes('Creature') && t.includes('Artifact') },
   { label: 'Enchantments',  match: (t) => !t.includes('Creature') && !t.includes('Artifact') && t.includes('Enchantment') },
   { label: 'Planeswalkers', match: (t) => t.includes('Planeswalker') && !t.includes('Creature') },
-  { label: 'Lands',         match: (t) => t.includes('Land'), isLand: true },
-  { label: 'Other',         match: (_) => true },
+  { label: 'Other',         match: (t) => !t.includes('Land') },   // non-land catchall before Lands
+  { label: 'Lands',         match: (_) => true, isLand: true },    // catch-all last row = bottom of my mat
 ];
 
-// Opponent board: Lands at top (farthest from center) → Creatures at bottom (closest to center),
-// mirroring the player's layout so the two creature rows face each other across the table.
-// Other MUST remain last so it doesn't swallow all cards before type-specific rows can match.
+// Opponent mat (top): Lands at top row (y=0 = farthest from center) → ... → Creatures at bottom row (closest to center).
+// Other catches non-creature leftovers; Creatures is the true catch-all last row.
 const TYPE_ROWS_OPP: typeof TYPE_ROWS = [
   { label: 'Lands',         match: (t) => t.includes('Land'), isLand: true },
   { label: 'Planeswalkers', match: (t) => t.includes('Planeswalker') && !t.includes('Creature') },
   { label: 'Enchantments',  match: (t) => !t.includes('Creature') && !t.includes('Artifact') && t.includes('Enchantment') },
   { label: 'Artifacts',     match: (t) => !t.includes('Creature') && t.includes('Artifact') },
-  { label: 'Creatures',     match: (t) => t.includes('Creature') },
-  { label: 'Other',         match: (_) => true },
+  { label: 'Other',         match: (t) => !t.includes('Creature') }, // non-creature catchall before Creatures
+  { label: 'Creatures',     match: (_) => true },                    // catch-all last row = bottom of opponent mat
 ];
 
 function groupByType(
@@ -1684,7 +1685,7 @@ function TableCanvas({
           {cardSize}px
         </span>
         <button
-          onClick={() => setCardSize(s => Math.min(200, s + 10))}
+          onClick={() => setCardSize(s => Math.min(275, s + 10))}
           style={{ background: 'none', border: 'none', cursor: 'pointer',
             color: '#9ca3af', fontSize: 15, fontWeight: 700, lineHeight: 1, padding: '0 3px' }}>
           + 🃏
