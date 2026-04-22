@@ -914,24 +914,13 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
 
 // ── Canvas layout helpers ─────────────────────────────────────────────────────
 
-const C_W_BASE = 120, C_H_BASE = 168;   // 120px wide, 1.4 ratio
-const C_LW_BASE = 96,  C_LH_BASE = 134; // lands slightly smaller
-const C_W_MIN = 60,   C_H_MIN = 84;     // never below 60px wide
-const C_LW_MIN = 48,  C_LH_MIN = 67;
-const C_HGAP = 4, C_RGAP = 16;         // tight 4px gap between cards
+const C_W_BASE = 140, C_H_BASE = 196;   // hardcoded 140×196 — no dynamic scaling
+const C_LW_BASE = 112, C_LH_BASE = 157; // lands slightly smaller
+const C_HGAP = 4, C_RGAP = 16;
 const C_LBLW = 80;
 
-function cardSizeForZone(groupCount: number, isLand: boolean, zoneW: number): { cW: number; cH: number } {
-  const baseW = isLand ? C_LW_BASE : C_W_BASE;
-  const baseH = isLand ? C_LH_BASE : C_H_BASE;
-  const minW  = isLand ? C_LW_MIN  : C_W_MIN;
-  if (groupCount === 0) return { cW: baseW, cH: baseH };
-  const availW = zoneW - C_LBLW - 8;
-  const fits = (groupCount * baseW + Math.max(0, groupCount - 1) * C_HGAP) <= availW;
-  if (fits) return { cW: baseW, cH: baseH };
-  // Scale down proportionally to fit, never below minW
-  const cW = Math.max(minW, Math.floor((availW - C_HGAP * Math.max(0, groupCount - 1)) / groupCount));
-  return { cW, cH: Math.round(cW * (baseH / baseW)) };
+function cardSizeForZone(_groupCount: number, isLand: boolean, _zoneW: number): { cW: number; cH: number } {
+  return isLand ? { cW: C_LW_BASE, cH: C_LH_BASE } : { cW: C_W_BASE, cH: C_H_BASE };
 }
 
 // Zone colors: [me, op1, op2, op3]
@@ -1198,7 +1187,7 @@ function TableCanvas({
   const [overBf, setOverBf] = useState(false);
   const [overGy, setOverGy] = useState(false);
   const [overEx, setOverEx] = useState(false);
-  const [blockerIds, setBlockerIds] = useState<Set<string>>(new Set());
+  const [blockerCards, setBlockerCards] = useState<GameCard[]>([]);
   const [overBlockers, setOverBlockers] = useState(false);
   const [blockersDeclared, setBlockersDeclared] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -1234,7 +1223,7 @@ function TableCanvas({
 
   useEffect(() => {
     if (!isDefendingPhase) {
-      setBlockerIds(new Set());
+      setBlockerCards([]);
       setBlockersDeclared(false);
     }
   }, [isDefendingPhase]);
@@ -1274,7 +1263,11 @@ function TableCanvas({
     window.addEventListener('mouseup', up);
   }
 
-  const myRows = buildCRows(me.battlefield, TYPE_ROWS, layout.my.w);
+  const blockerIdSet = new Set(blockerCards.map(c => c.instanceId));
+  const BLOCK_ZONE_H = C_H_BASE + 44;
+  const rowBaseY = MY_LABEL_H + (isDefendingPhase ? BLOCK_ZONE_H + 8 : 0);
+  const battlefieldMinusBlockers = me.battlefield.filter(c => !blockerIdSet.has(c.instanceId));
+  const myRows = buildCRows(battlefieldMinusBlockers, TYPE_ROWS, layout.my.w);
   const myCardMap = new Map<string, GameCard>(me.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
   return (
@@ -1487,7 +1480,7 @@ function TableCanvas({
           {/* Card rows */}
           {myRows.map(row => (
             <React.Fragment key={row.label}>
-              <div style={{ position: 'absolute', left: 0, top: MY_LABEL_H + row.y + row.cH / 2 - 8,
+              <div style={{ position: 'absolute', left: 0, top: rowBaseY + row.y + row.cH / 2 - 8,
                 width: C_LBLW - 4, textAlign: 'right', pointerEvents: 'none' }}>
                 <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5,
                   color: row.isLand ? 'rgba(134,239,172,0.7)' : 'rgba(255,255,255,0.55)' }}>
@@ -1499,8 +1492,7 @@ function TableCanvas({
                 if (!card) return null;
                 const showBadge = slot.groupSize > 1 && slot.groupIndex === slot.groupSize - 1;
                 return (
-                  <div key={slot.id} style={{ position: 'absolute', left: slot.x, top: MY_LABEL_H + row.y, zIndex: 2 + slot.groupIndex,
-                    filter: blockerIds.has(slot.id) ? 'drop-shadow(0 0 6px rgba(239,68,68,0.9))' : 'none' }}
+                  <div key={slot.id} style={{ position: 'absolute', left: slot.x, top: rowBaseY + row.y, zIndex: 2 + slot.groupIndex }}
                     onMouseDown={e => e.stopPropagation()}>
                     {showBadge && (
                       <div style={{ position: 'absolute', top: -7, left: -7, zIndex: 30,
@@ -1532,17 +1524,16 @@ function TableCanvas({
             </React.Fragment>
           ))}
 
-          {/* ── Declare Blockers strip (during opponent's combat) ── */}
+          {/* ── Blocking Zone card tray (during opponent's combat) ── */}
           {isDefendingPhase && (
             <div style={{
-              position: 'absolute', left: 14, right: 14, top: MY_LABEL_H + 4, height: 44,
-              border: blockersDeclared ? '2px solid rgba(134,239,172,0.7)' : '2px dashed rgba(239,68,68,0.75)',
-              borderRadius: 8, zIndex: 10,
-              background: overBlockers ? 'rgba(239,68,68,0.15)' : 'rgba(239,68,68,0.06)',
-              boxShadow: blockersDeclared ? 'none' : '0 0 12px rgba(239,68,68,0.2)',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '0 14px', gap: 12,
+              position: 'absolute', left: 14, right: 14, top: MY_LABEL_H + 4, height: BLOCK_ZONE_H,
+              border: blockersDeclared ? '2px solid rgba(134,239,172,0.7)' : '2px solid rgba(239,68,68,0.7)',
+              borderRadius: 10, zIndex: 10,
+              background: overBlockers ? 'rgba(239,68,68,0.13)' : 'rgba(15,10,10,0.75)',
+              boxShadow: blockersDeclared ? '0 0 16px rgba(134,239,172,0.15)' : '0 0 18px rgba(239,68,68,0.25)',
               transition: 'background 0.15s',
+              display: 'flex', flexDirection: 'column',
             }}
               onDragOver={(e) => { e.preventDefault(); setOverBlockers(true); }}
               onDragLeave={() => setOverBlockers(false)}
@@ -1550,40 +1541,84 @@ function TableCanvas({
                 e.preventDefault(); setOverBlockers(false);
                 try {
                   const d: DragData = JSON.parse(e.dataTransfer.getData('application/json'));
+                  if (d.source !== 'battlefield') return;
                   const card = me.battlefield.find(c => c.instanceId === d.instanceId);
-                  if (card && card.typeLine?.includes('Creature') && !card.tapped) {
-                    setBlockerIds(prev => new Set([...prev, d.instanceId]));
+                  if (card && card.typeLine?.includes('Creature') && !card.tapped && !blockerIdSet.has(d.instanceId)) {
+                    setBlockerCards(prev => [...prev, card]);
                   }
                 } catch { /* */ }
               }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <span style={{ fontSize: 10, fontWeight: 800, color: blockersDeclared ? '#86efac' : '#f87171', letterSpacing: 0.8 }}>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '5px 12px', borderBottom: '1px solid rgba(239,68,68,0.2)', flexShrink: 0 }}
+                onMouseDown={e => e.stopPropagation()}>
+                <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.8,
+                  color: blockersDeclared ? '#86efac' : '#f87171' }}>
                   {blockersDeclared
-                    ? `✓ ${blockerIds.size} blocker${blockerIds.size !== 1 ? 's' : ''} confirmed`
-                    : `🛡 Drag creatures here to block${blockerIds.size > 0 ? ` — ${blockerIds.size} selected` : ''}`}
+                    ? `✓ ${blockerCards.length} blocker${blockerCards.length !== 1 ? 's' : ''} confirmed`
+                    : `🛡 Blocking Zone${blockerCards.length > 0 ? ` — ${blockerCards.length} creature${blockerCards.length !== 1 ? 's' : ''}` : ' — drag untapped creatures here'}`}
                 </span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {blockerCards.length > 0 && !blockersDeclared && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); socket.emit('game:declare_blockers', { blockerIds: blockerCards.map(c => c.instanceId) }); setBlockersDeclared(true); }}
+                      onMouseDown={e => e.stopPropagation()}
+                      style={{ fontSize: 10, fontWeight: 800, padding: '3px 12px', borderRadius: 6,
+                        background: 'rgba(239,68,68,0.25)', border: '1px solid rgba(239,68,68,0.6)',
+                        color: '#fca5a5', cursor: 'pointer' }}>
+                      Confirm Blockers
+                    </button>
+                  )}
+                  {blockerCards.length > 0 && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setBlockerCards([]); setBlockersDeclared(false); }}
+                      onMouseDown={e => e.stopPropagation()}
+                      style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 6,
+                        background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)',
+                        color: '#94a3b8', cursor: 'pointer' }}>
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {blockerIds.size > 0 && !blockersDeclared && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); socket.emit('game:declare_blockers', { blockerIds: [...blockerIds] }); setBlockersDeclared(true); }}
-                    onMouseDown={e => e.stopPropagation()}
-                    style={{ fontSize: 11, fontWeight: 800, padding: '5px 14px', borderRadius: 7,
-                      background: 'rgba(239,68,68,0.25)', border: '1px solid rgba(239,68,68,0.6)',
-                      color: '#fca5a5', cursor: 'pointer' }}>
-                    Confirm Blockers
-                  </button>
-                )}
-                {blockerIds.size > 0 && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setBlockerIds(new Set()); setBlockersDeclared(false); }}
-                    onMouseDown={e => e.stopPropagation()}
-                    style={{ fontSize: 11, fontWeight: 700, padding: '5px 10px', borderRadius: 7,
-                      background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)',
-                      color: '#94a3b8', cursor: 'pointer' }}>
-                    Clear
-                  </button>
-                )}
+              {/* Cards */}
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: C_HGAP,
+                padding: '4px 12px', overflowX: 'auto', overflowY: 'hidden' }}
+                onMouseDown={e => e.stopPropagation()}>
+                {blockerCards.length === 0 ? (
+                  <span style={{ color: 'rgba(239,68,68,0.3)', fontSize: 11, fontStyle: 'italic', margin: 'auto' }}>
+                    Drop untapped creatures here
+                  </span>
+                ) : blockerCards.map(card => (
+                  <div key={card.instanceId} style={{ position: 'relative', flexShrink: 0 }}
+                    title="Right-click → send to graveyard"
+                    onContextMenu={(e) => {
+                      e.preventDefault(); e.stopPropagation();
+                      setBlockerCards(prev => prev.filter(c => c.instanceId !== card.instanceId));
+                      onGraveyardCard(card.instanceId);
+                    }}>
+                    <TappedCardWrapper card={card} cardW={C_W_BASE} cardH={C_H_BASE}>
+                      <div className="w-full h-full">
+                        {card.faceDown ? (
+                          <div className="w-full h-full rounded-lg flex items-center justify-center"
+                            style={{ background: '#1e1b4b', border: '2px solid rgba(239,68,68,0.6)' }}>
+                            <span style={{ fontSize: 22, opacity: 0.3 }}>🂠</span>
+                          </div>
+                        ) : card.imageUri ? (
+                          <img src={card.imageUri} alt={card.name} className="w-full h-full object-cover rounded-lg"
+                            style={{ border: '2px solid rgba(239,68,68,0.65)',
+                              boxShadow: '0 0 10px rgba(239,68,68,0.4)' }} />
+                        ) : (
+                          <div className="w-full h-full rounded-lg flex items-center justify-center"
+                            style={{ background: '#1f2937', border: '2px solid rgba(239,68,68,0.6)' }}>
+                            <span style={{ fontSize: 9, color: '#6b7280' }}>{card.name.slice(0, 10)}</span>
+                          </div>
+                        )}
+                      </div>
+                    </TappedCardWrapper>
+                    <PtBar card={card} />
+                  </div>
+                ))}
               </div>
             </div>
           )}
