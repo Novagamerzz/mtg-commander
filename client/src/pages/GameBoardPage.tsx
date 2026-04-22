@@ -1190,6 +1190,7 @@ function TableCanvas({
   onDropToGy, onDropToEx, onOpenGy, onOpenEx, gyCards, exCards, monarchSocketId,
 }: TableCanvasProps) {
   const [zoom, setZoom] = useState(1.0);
+  const [showZoomPanel, setShowZoomPanel] = useState(false);
   const [overBf, setOverBf] = useState(false);
   const [overGy, setOverGy] = useState(false);
   const [overEx, setOverEx] = useState(false);
@@ -1204,15 +1205,23 @@ function TableCanvas({
   const myColor = ZONE_COLORS[0];
   const MIN_ZOOM = 60 / C_W_BASE;
 
-  // Mouse wheel always zooms (pinch-to-zoom on trackpad also fires wheel with ctrlKey)
+  // Ctrl/Cmd+wheel → zoom; Shift+wheel → pan left/right; plain wheel → pan up/down
+  // Trackpad pinch fires as ctrlKey+wheel, so that also zooms.
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const delta = e.ctrlKey ? e.deltaY * 0.01 : e.deltaY * 0.003;
-      const factor = Math.exp(-delta);
-      setZoom(prev => Math.max(MIN_ZOOM, Math.min(2.0, prev * factor)));
+      if (e.ctrlKey || e.metaKey) {
+        // Zoom
+        const factor = Math.exp(-e.deltaY * 0.01);
+        setZoom(prev => Math.max(MIN_ZOOM, Math.min(2.0, prev * factor)));
+      } else if (e.shiftKey) {
+        el.scrollLeft += e.deltaY;
+      } else {
+        el.scrollTop  += e.deltaY;
+        el.scrollLeft += e.deltaX;
+      }
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
@@ -1452,7 +1461,7 @@ function TableCanvas({
               boxShadow: '0 0 30px rgba(134,239,172,0.12)' }} />
           )}
 
-          {/* Drop capture */}
+          {/* Drop capture — no stopPropagation so mousedown bubbles to viewport for pan */}
           <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}
             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOverBf(true); }}
             onDragLeave={() => setOverBf(false)}
@@ -1462,8 +1471,7 @@ function TableCanvas({
                 const d: DragData = JSON.parse(e.dataTransfer.getData('application/json'));
                 if (d.source === 'hand') onPlayCard(d.instanceId);
               } catch { /* */ }
-            }}
-            onMouseDown={e => e.stopPropagation()} />
+            }} />
 
           {/* Empty hint */}
           {me.battlefield.length === 0 && (
@@ -1644,75 +1652,93 @@ function TableCanvas({
         </div>
       </div>
 
-      {/* ── Zoom widget — fixed to viewport corner, unaffected by pan ── */}
-      <div style={{
-        position: 'fixed', bottom: 14, right: 14, zIndex: 9999,
-        display: 'flex', flexDirection: 'column', gap: 8,
-        background: 'rgba(8,11,20,0.93)', backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14,
-        padding: '12px 14px', minWidth: 172,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.05)',
-        cursor: 'default',
-      }} onMouseDown={e => e.stopPropagation()}>
+      {/* ── Zoom widget — collapsed pill, opens panel on click ── */}
+      <div style={{ position: 'fixed', bottom: 14, right: 14, zIndex: 9999 }}
+        onMouseDown={e => e.stopPropagation()}>
 
-        {/* Header row */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5,
-            color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase' }}>Card Size</span>
-          <span style={{ fontSize: 13, fontWeight: 900, color: '#f1f5f9', fontFamily: 'monospace' }}>
-            {Math.round(zoom * 100)}%
-          </span>
-        </div>
+        {/* Expanded panel — appears above the pill */}
+        {showZoomPanel && (
+          <>
+            {/* Outside-click backdrop */}
+            <div style={{ position: 'fixed', inset: 0, zIndex: -1 }}
+              onMouseDown={() => setShowZoomPanel(false)} />
+            <div style={{
+              position: 'absolute', bottom: 'calc(100% + 8px)', right: 0,
+              background: 'rgba(8,11,20,0.96)', backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(255,255,255,0.12)', borderRadius: 14,
+              padding: '14px 16px', minWidth: 190,
+              boxShadow: '0 -4px 32px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.06)',
+              display: 'flex', flexDirection: 'column', gap: 10,
+            }}>
+              {/* Label + value */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5,
+                  color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase' }}>Card Size</span>
+                <span style={{ fontSize: 14, fontWeight: 900, color: '#f1f5f9', fontFamily: 'monospace' }}>
+                  {Math.round(zoom * 100)}%
+                </span>
+              </div>
 
-        {/* −  slider  + */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {[{ label: '−', delta: -0.1 }, { label: '+', delta: 0.1 }].slice(0, 1).map(() => (
-            <button key="minus"
-              onClick={() => setZoom(prev => Math.max(MIN_ZOOM, Math.round((prev - 0.1) * 100) / 100))}
-              style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0, cursor: 'pointer',
-                background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.14)',
-                color: '#d1d5db', fontSize: 16, fontWeight: 700, lineHeight: 1,
-                display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              −
-            </button>
-          ))}
-          <input
-            type="range"
-            min={Math.round(MIN_ZOOM * 100)}
-            max={200}
-            step={1}
-            value={Math.round(zoom * 100)}
-            onChange={e => setZoom(Number(e.target.value) / 100)}
-            style={{ flex: 1, accentColor: '#4ade80', cursor: 'pointer', height: 4 }}
-          />
-          <button
-            onClick={() => setZoom(prev => Math.min(2.0, Math.round((prev + 0.1) * 100) / 100))}
-            style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0, cursor: 'pointer',
-              background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.14)',
-              color: '#d1d5db', fontSize: 16, fontWeight: 700, lineHeight: 1,
-              display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            +
-          </button>
-        </div>
+              {/* − slider + */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button onClick={() => setZoom(p => Math.max(MIN_ZOOM, Math.round((p - 0.1) * 100) / 100))}
+                  style={{ width: 28, height: 28, borderRadius: 7, flexShrink: 0, cursor: 'pointer',
+                    background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#d1d5db', fontSize: 18, fontWeight: 700, lineHeight: 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  −
+                </button>
+                <input type="range" min={Math.round(MIN_ZOOM * 100)} max={200} step={1}
+                  value={Math.round(zoom * 100)}
+                  onChange={e => setZoom(Number(e.target.value) / 100)}
+                  style={{ flex: 1, accentColor: '#4ade80', cursor: 'pointer' }} />
+                <button onClick={() => setZoom(p => Math.min(2.0, Math.round((p + 0.1) * 100) / 100))}
+                  style={{ width: 28, height: 28, borderRadius: 7, flexShrink: 0, cursor: 'pointer',
+                    background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#d1d5db', fontSize: 18, fontWeight: 700, lineHeight: 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  +
+                </button>
+              </div>
 
-        {/* Reset / My Zone */}
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            onClick={() => setZoom(1.0)}
-            style={{ flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 7,
-              cursor: 'pointer', background: zoom === 1.0 ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.06)',
-              border: zoom === 1.0 ? '1px solid rgba(74,222,128,0.4)' : '1px solid rgba(255,255,255,0.11)',
-              color: zoom === 1.0 ? '#86efac' : '#9ca3af' }}>
-            Reset
-          </button>
-          <button
-            onClick={scrollToMyZone}
-            style={{ flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 7,
-              cursor: 'pointer', background: 'rgba(255,255,255,0.06)',
-              border: '1px solid rgba(255,255,255,0.11)', color: '#9ca3af' }}>
-            ⊡ My Zone
-          </button>
-        </div>
+              {/* Reset + My Zone */}
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => { setZoom(1.0); setShowZoomPanel(false); }}
+                  style={{ flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 7,
+                    cursor: 'pointer',
+                    background: zoom === 1.0 ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.06)',
+                    border: zoom === 1.0 ? '1px solid rgba(74,222,128,0.4)' : '1px solid rgba(255,255,255,0.11)',
+                    color: zoom === 1.0 ? '#86efac' : '#9ca3af' }}>
+                  Reset
+                </button>
+                <button onClick={() => { scrollToMyZone(); setShowZoomPanel(false); }}
+                  style={{ flex: 1, fontSize: 10, fontWeight: 700, padding: '5px 0', borderRadius: 7,
+                    cursor: 'pointer', background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.11)', color: '#9ca3af' }}>
+                  ⊡ My Zone
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Collapsed pill — always visible */}
+        <button
+          onClick={() => setShowZoomPanel(v => !v)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+            padding: '6px 12px', borderRadius: 20,
+            background: showZoomPanel ? 'rgba(74,222,128,0.15)' : 'rgba(8,11,20,0.9)',
+            backdropFilter: 'blur(10px)',
+            border: showZoomPanel ? '1px solid rgba(74,222,128,0.4)' : '1px solid rgba(255,255,255,0.13)',
+            boxShadow: '0 2px 16px rgba(0,0,0,0.6)',
+            color: showZoomPanel ? '#86efac' : '#9ca3af',
+            fontSize: 12, fontWeight: 700, fontFamily: 'monospace',
+            transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+          }}>
+          <span style={{ fontSize: 13 }}>🔍</span>
+          {Math.round(zoom * 100)}%
+        </button>
       </div>
     </div>
   );
