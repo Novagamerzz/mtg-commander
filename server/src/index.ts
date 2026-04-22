@@ -495,35 +495,54 @@ io.on('connection', (socket) => {
   // ─── Game ────────────────────────────────────────────────────────────────────
 
   socket.on('game:rejoin', (payload) => {
-    // Try direct lookup first (same socket ID as before)
+    // 1. Direct lookup (same socket — still connected, no re-bind needed)
     let roomId = socketToRoom.get(socket.id);
 
-    // Fallback: find by userId when socket ID changed after reconnect
+    // 2. Fallback by userId (socket ID changed after reconnect)
     if (!roomId && payload?.userId) {
       roomId = userIdToRoom.get(payload.userId);
-      if (roomId) {
-        // Re-bind the new socket ID
-        socketToRoom.set(socket.id, roomId);
-        const game = games.get(roomId);
-        if (game) {
-          const player = game.players.find((p) => p.userId === payload.userId);
-          if (player) {
-            // Remove stale socket mapping and update player's socket ID
-            socketToRoom.delete(player.socketId);
-            player.socketId = socket.id;
-            socket.join(roomId);
-            appendLog(game, `${player.playerName} reconnected`);
-            io.to(game.roomId).emit('game:announcement', { message: `🔌 ${player.playerName} reconnected`, type: 'info' });
-            console.log(`[game:rejoin] ${player.playerName} re-bound ${socket.id}`);
-          }
-        }
-      }
     }
 
-    const game = roomId ? games.get(roomId) : undefined;
-    if (game) {
-      broadcastGame(game);
+    // 3. Fallback by roomId URL param (catches races where userId hasn't loaded yet)
+    if (!roomId && payload?.roomId) {
+      const candidate = games.get(payload.roomId);
+      if (candidate) roomId = payload.roomId;
     }
+
+    if (!roomId) return; // nothing to rejoin
+
+    const game = games.get(roomId);
+    if (!game) return;
+
+    // Re-bind socket → player if needed (socket ID changed)
+    const player =
+      game.players.find((p) => p.socketId === socket.id) ??
+      game.players.find((p) => p.userId  === payload?.userId);
+
+    if (player && player.socketId !== socket.id) {
+      socketToRoom.delete(player.socketId);
+      player.socketId = socket.id;
+      appendLog(game, `${player.playerName} reconnected`);
+      io.to(game.roomId).emit('game:announcement', { message: `🔌 ${player.playerName} reconnected`, type: 'info' });
+    }
+
+    // Always (re-)map this socket and join the room channel
+    socketToRoom.set(socket.id, roomId);
+    socket.join(roomId);
+
+    // Diagnostic log: verify state the reconnected player will receive
+    const myState = toPersonalState(game, socket.id);
+    const activePlayer = game.players[game.activePlayerIndex];
+    console.log(
+      `[game:rejoin] ${player?.playerName ?? 'unknown'} | ` +
+      `isMyTurn=${activePlayer?.socketId === socket.id} | ` +
+      `phase=${game.phase} | ` +
+      `activeTurn=${activePlayer?.playerName ?? '?'}`
+    );
+
+    // Broadcast full state to everyone so boards stay in sync
+    broadcastGame(game);
+    void myState; // used only for the log above
   });
 
   socket.on('game:draw_card', () => {

@@ -139,7 +139,7 @@ export interface ClientToServerEvents {
   'room:select_deck': (payload: { deckId: string; deckName: string; cards: DeckCardData[] }) => void;
   'room:start_game': () => void;
   'room:leave': () => void;
-  'game:rejoin': (payload?: { userId?: string }) => void;
+  'game:rejoin': (payload?: { userId?: string; roomId?: string }) => void;
   'game:draw_card': () => void;
   'game:play_card': (payload: { instanceId: string }) => void;
   'game:tap_card': (payload: { instanceId: string }) => void;

@@ -2032,11 +2032,23 @@ export default function GameBoardPage() {
 
   useEffect(() => {
     const userId = user?.id;
-    const rejoin = () => socket.emit('game:rejoin', { userId });
+    // Always send both userId AND roomId so the server can find the game
+    // even when auth hasn't loaded yet (userId undefined) or socket ID changed
+    const rejoin = () => socket.emit('game:rejoin', { userId, roomId: roomId || undefined });
 
     if (!socket.connected) socket.connect();
     socket.on('connect', rejoin);
-    socket.on('game:state', setGameState);
+    socket.on('game:state', (state) => {
+      setGameState(state);
+      // Diagnostic: verify turn/phase is correct after reconnect
+      const me = state.players.find(p => p.socketId === state.mySocketId);
+      const active = state.players[state.activePlayerIndex];
+      const isMyTurn = active?.socketId === state.mySocketId;
+      console.log(
+        `[game:state] isMyTurn=${isMyTurn} | phase=${state.phase} | ` +
+        `activeTurn=${active?.playerName ?? '?'} | me=${me?.playerName ?? '?'}`
+      );
+    });
     socket.on('game:library_contents', (cards) => { setLibraryCards(cards); setLibraryLoading(false); });
     socket.on('game:scry_cards', (cards) => { setScryCards(cards); setScryInputOpen(false); });
     socket.on('game:mill_result', (cards) => { setMillCards(cards); setMillInputOpen(false); });
@@ -2079,7 +2091,7 @@ export default function GameBoardPage() {
     rejoin();
     return () => {
       socket.off('connect', rejoin);
-      socket.off('game:state', setGameState);
+      socket.off('game:state');
       socket.off('game:library_contents');
       socket.off('game:scry_cards');
       socket.off('game:mill_result');
