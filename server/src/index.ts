@@ -1144,9 +1144,9 @@ io.on('connection', (socket) => {
 
     if (attacks.length === 0) {
       game.phase = 'main2';
-      game.combatState = undefined;
+      game.combatState = null;
       appendLog(game, 'No attackers declared — skipping to Main 2');
-      io.to(game.roomId).emit('game:announcement', { message: 'No attackers declared — skipping to Main 2' });
+      io.to(game.roomId).emit('game:announcement', { message: 'No attackers declared — skipping to Main 2', type: 'info' });
       broadcastGame(game);
       return;
     }
