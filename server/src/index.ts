@@ -59,6 +59,11 @@ interface InternalPlayer {
   mulliganScryPending: boolean;
 }
 
+interface InternalCombatState {
+  attacks: { attackerId: string; attackingUserId: string; targetUserId: string }[];
+  blocks: { blockerId: string; blockingAttackerId: string; defendingUserId: string }[];
+}
+
 interface InternalGame {
   roomId: string;
   players: InternalPlayer[];
@@ -70,6 +75,7 @@ interface InternalGame {
   pendingElimination: { socketId: string; playerName: string; reason: string } | null;
   mulliganPhase: boolean;
   monarchSocketId: string | null;
+  combatState: InternalCombatState | null;
 }
 
 interface InternalRoomPlayer {
@@ -149,6 +155,28 @@ function toPublicRoom(room: InternalRoom): Room {
 
 function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameState {
   const activePlayer = game.players[game.activePlayerIndex];
+  const allBf = game.players.flatMap(p => p.battlefield);
+  const combatState: PersonalGameState['combatState'] = game.combatState ? {
+    attacks: game.combatState.attacks.map(a => {
+      const card = allBf.find(c => c.instanceId === a.attackerId);
+      const attP = game.players.find(p => p.userId === a.attackingUserId);
+      const tgtP = game.players.find(p => p.userId === a.targetUserId);
+      return {
+        attackerId: a.attackerId, attackerName: card?.name ?? '?', attackerImage: card?.imageUri ?? '',
+        attackingUserId: a.attackingUserId, attackingPlayerName: attP?.playerName ?? '?',
+        targetUserId: a.targetUserId, targetPlayerName: tgtP?.playerName ?? '?',
+      };
+    }),
+    blocks: game.combatState.blocks.map(b => {
+      const card = allBf.find(c => c.instanceId === b.blockerId);
+      const defP = game.players.find(p => p.userId === b.defendingUserId);
+      return {
+        blockerId: b.blockerId, blockerName: card?.name ?? '?', blockerImage: card?.imageUri ?? '',
+        blockingAttackerId: b.blockingAttackerId,
+        defendingUserId: b.defendingUserId, defendingPlayerName: defP?.playerName ?? '?',
+      };
+    }),
+  } : null;
   return {
     roomId: game.roomId,
     mySocketId,
@@ -161,6 +189,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
     pendingElimination: game.pendingElimination,
     mulliganPhase: game.mulliganPhase,
     monarchSocketId: game.monarchSocketId,
+    combatState,
     players: game.players.map((p, i): PersonalPlayerState => ({
       socketId: p.socketId,
       userId: p.userId,
@@ -280,10 +309,11 @@ function createGame(room: InternalRoom): InternalGame {
     pendingElimination: null,
     mulliganPhase: true,
     monarchSocketId: null,
+    combatState: null,
   };
 }
 
-const PHASE_ORDER: TurnPhase[] = ['untap', 'upkeep', 'draw', 'main1', 'combat', 'main2', 'end'];
+const PHASE_ORDER: TurnPhase[] = ['untap', 'upkeep', 'draw', 'main1', 'begin_combat', 'declare_attackers', 'declare_blockers', 'damage', 'end_combat', 'main2', 'end'];
 
 function advancePhase(game: InternalGame) {
   const idx = PHASE_ORDER.indexOf(game.phase);
@@ -310,6 +340,7 @@ function checkAllMulliganReady(game: InternalGame) {
 }
 
 function advanceTurn(game: InternalGame) {
+  game.combatState = null;
   const total = game.players.length;
   let next = (game.activePlayerIndex + 1) % total;
   let guard = 0;
@@ -344,7 +375,9 @@ function moveCard(
 
 const PHASE_NAMES: Record<string, string> = {
   untap: 'Untap', upkeep: 'Upkeep', draw: 'Draw',
-  combat: 'Combat', end: 'End Step',
+  begin_combat: 'Begin Combat', declare_attackers: 'Declare Attackers',
+  declare_blockers: 'Declare Blockers', damage: 'Damage', end_combat: 'End Combat',
+  main2: 'Main 2', end: 'End Step',
 };
 
 function checkPlayTiming(game: InternalGame, player: InternalPlayer, card: InternalCard): string | null {
@@ -596,16 +629,18 @@ io.on('connection', (socket) => {
   socket.on('game:end_phase', () => {
     const game = getGame(socket.id);
     if (!game || game.players[game.activePlayerIndex]?.socketId !== socket.id) return;
-    const wasCombat = game.phase === 'combat';
+    if (game.phase === 'end_combat') {
+      game.combatState = null;
+      io.to(game.roomId).emit('combatEnded');
+    }
     advancePhase(game);
-    if (wasCombat) io.to(game.roomId).emit('combatEnded');
     broadcastGame(game);
   });
 
   socket.on('game:end_turn', () => {
     const game = getGame(socket.id);
     if (!game || game.players[game.activePlayerIndex]?.socketId !== socket.id) return;
-    io.to(game.roomId).emit('combatEnded');
+    if (game.combatState) { game.combatState = null; io.to(game.roomId).emit('combatEnded'); }
     advanceTurn(game);
     broadcastGame(game);
   });
@@ -1078,27 +1113,41 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('game:declare_blockers', ({ blockerIds }) => {
+  socket.on('game:declare_attackers', ({ attacks }) => {
     const game = getGame(socket.id);
-    if (!game) return;
+    if (!game || game.phase !== 'declare_attackers') return;
+    const player = game.players.find(p => p.socketId === socket.id);
+    if (!player || game.players[game.activePlayerIndex].socketId !== socket.id) return;
+    // Tap all attacking creatures
+    for (const atk of attacks) {
+      const card = player.battlefield.find(c => c.instanceId === atk.attackerId);
+      if (card) card.tapped = true;
+    }
+    game.combatState = {
+      attacks: attacks.map(a => ({ attackerId: a.attackerId, attackingUserId: player.userId, targetUserId: a.targetUserId })),
+      blocks: [],
+    };
+    appendLog(game, `${player.playerName} declared ${attacks.length} attacker${attacks.length !== 1 ? 's' : ''}`);
+    // Auto-advance to declare_blockers
+    game.phase = 'declare_blockers';
+    io.to(game.roomId).emit('attackersDeclared', { attackingPlayerName: player.playerName, count: attacks.length });
+    broadcastGame(game);
+  });
+
+  socket.on('game:declare_blockers', ({ blocks }) => {
+    const game = getGame(socket.id);
+    if (!game || game.phase !== 'declare_blockers' || !game.combatState) return;
     const player = game.players.find(p => p.socketId === socket.id);
     if (!player) return;
-    const blockers = blockerIds
-      .map(id => player.battlefield.find(c => c.instanceId === id))
-      .filter((c): c is InternalCard => !!c)
-      .map(c => ({
-        instanceId: c.instanceId,
-        name: c.name,
-        imageUri: c.imageUri,
-        power: c.power,
-        toughness: c.toughness,
-        counters: c.counters,
-        typeLine: c.typeLine,
-      }));
-    appendLog(game, `${player.playerName} declared ${blockers.length} blocker${blockers.length !== 1 ? 's' : ''}`);
-    const payload = { defendingUserId: player.userId, defendingPlayerName: player.playerName, blockers };
-    console.log(`[blockersConfirmed] emit → room ${game.roomId}`, payload.defendingPlayerName, payload.blockers.map(b => b.name));
-    io.to(game.roomId).emit('blockersConfirmed', payload);
+    // Replace this player's blocks
+    game.combatState.blocks = [
+      ...game.combatState.blocks.filter(b => b.defendingUserId !== player.userId),
+      ...blocks.map(b => ({ blockerId: b.blockerId, blockingAttackerId: b.blockingAttackerId, defendingUserId: player.userId })),
+    ];
+    appendLog(game, `${player.playerName} declared ${blocks.length} blocker${blocks.length !== 1 ? 's' : ''}`);
+    console.log(`[blockersDeclared] emit → room ${game.roomId}`, player.playerName, blocks.length);
+    io.to(game.roomId).emit('blockersDeclared', { defendingPlayerName: player.playerName, count: blocks.length });
+    broadcastGame(game);
   });
 
   // ─── Disconnect ───────────────────────────────────────────────────────────────

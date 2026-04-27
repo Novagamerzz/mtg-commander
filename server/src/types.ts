@@ -71,7 +71,7 @@ export interface Room {
 
 // ── Game State ────────────────────────────────────────────────────────────────
 
-export type TurnPhase = 'untap' | 'upkeep' | 'draw' | 'main1' | 'combat' | 'main2' | 'end';
+export type TurnPhase = 'untap' | 'upkeep' | 'draw' | 'main1' | 'begin_combat' | 'declare_attackers' | 'declare_blockers' | 'damage' | 'end_combat' | 'main2' | 'end';
 
 export interface PersonalPlayerState {
   socketId: string;
@@ -96,6 +96,20 @@ export interface PersonalPlayerState {
   mulliganReady: boolean;
 }
 
+export interface CombatAttackEntry {
+  attackerId: string; attackerName: string; attackerImage: string;
+  attackingUserId: string; attackingPlayerName: string;
+  targetUserId: string; targetPlayerName: string;
+}
+export interface CombatBlockEntry {
+  blockerId: string; blockerName: string; blockerImage: string;
+  blockingAttackerId: string; defendingUserId: string; defendingPlayerName: string;
+}
+export interface PersonalCombatState {
+  attacks: CombatAttackEntry[];
+  blocks: CombatBlockEntry[];
+}
+
 export interface PersonalGameState {
   roomId: string;
   mySocketId: string;
@@ -109,6 +123,7 @@ export interface PersonalGameState {
   pendingElimination: { socketId: string; playerName: string; reason: string } | null;
   mulliganPhase: boolean;
   monarchSocketId: string | null;
+  combatState: PersonalCombatState | null;
 }
 
 // ── Socket Events ─────────────────────────────────────────────────────────────
@@ -129,7 +144,8 @@ export interface ServerToClientEvents {
   'player:joined': (player: Player) => void;
   'player:left': (playerId: string) => void;
   'chat:message': (payload: ChatMessage) => void;
-  'blockersConfirmed': (data: { defendingUserId: string; defendingPlayerName: string; blockers: { instanceId: string; name: string; imageUri: string; power?: string; toughness?: string; counters?: Record<string, number>; typeLine?: string }[] }) => void;
+  'attackersDeclared': (data: { attackingPlayerName: string; count: number }) => void;
+  'blockersDeclared': (data: { defendingPlayerName: string; count: number }) => void;
   'combatEnded': () => void;
 }
 
@@ -179,5 +195,6 @@ export interface ClientToServerEvents {
   'game:join': (payload: { gameId: string; playerName: string }) => void;
   'player:update_life': (payload: { delta: number }) => void;
   'chat:send': (message: string) => void;
-  'game:declare_blockers': (payload: { blockerIds: string[] }) => void;
+  'game:declare_attackers': (payload: { attacks: { attackerId: string; targetUserId: string }[] }) => void;
+  'game:declare_blockers': (payload: { blocks: { blockerId: string; blockingAttackerId: string }[] }) => void;
 }

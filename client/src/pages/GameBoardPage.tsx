@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { socket } from '../lib/socket';
 import { useAuth } from '../contexts/AuthContext';
-import type { PersonalGameState, PersonalPlayerState, GameCard, TurnPhase } from '../lib/types';
+import type { PersonalGameState, PersonalPlayerState, GameCard, TurnPhase, PersonalCombatState } from '../lib/types';
 
 // ── Zone viewer modal ─────────────────────────────────────────────────────────
 
@@ -517,14 +517,18 @@ function groupByType(
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const PHASES: { key: TurnPhase; label: string }[] = [
-  { key: 'untap',  label: 'Untap'  },
-  { key: 'upkeep', label: 'Upkeep' },
-  { key: 'draw',   label: 'Draw'   },
-  { key: 'main1',  label: 'Main 1' },
-  { key: 'combat', label: 'Combat' },
-  { key: 'main2',  label: 'Main 2' },
-  { key: 'end',    label: 'End'    },
+const PHASES: { key: TurnPhase; label: string; group?: string }[] = [
+  { key: 'untap',            label: 'Untap'       },
+  { key: 'upkeep',           label: 'Upkeep'      },
+  { key: 'draw',             label: 'Draw'        },
+  { key: 'main1',            label: 'Main 1'      },
+  { key: 'begin_combat',     label: '⚔️ Begin'    , group: 'combat' },
+  { key: 'declare_attackers',label: '⚔️ Attackers', group: 'combat' },
+  { key: 'declare_blockers', label: '🛡 Blockers'  , group: 'combat' },
+  { key: 'damage',           label: '💥 Damage'   , group: 'combat' },
+  { key: 'end_combat',       label: '⚔️ End'       , group: 'combat' },
+  { key: 'main2',            label: 'Main 2'      },
+  { key: 'end',              label: 'End'         },
 ];
 
 const FELT: React.CSSProperties = {
@@ -572,15 +576,20 @@ function HoverPreview({ card, x, y }: { card: GameCard; x: number; y: number }) 
 // ── Phase tracker ─────────────────────────────────────────────────────────────
 
 function PhaseTracker({ phase }: { phase: TurnPhase }) {
+  const isCombat = ['begin_combat','declare_attackers','declare_blockers','damage','end_combat'].includes(phase);
   return (
     <div className="flex items-center gap-0.5">
       {PHASES.map(({ key, label }) => {
         const active = phase === key;
+        const inCombatGroup = key === 'begin_combat' || key === 'declare_attackers' || key === 'declare_blockers' || key === 'damage' || key === 'end_combat';
+        // When we're NOT in a combat phase, collapse all 5 combat steps into one "Combat" pill
+        if (inCombatGroup && !isCombat && key !== 'begin_combat') return null;
+        const displayLabel = inCombatGroup && !isCombat ? '⚔️ Combat' : label;
         return (
           <span key={key}
-            className={`text-xs font-bold px-2.5 py-1.5 rounded-md transition-all duration-200 select-none ${active ? 'text-gray-950' : 'text-gray-600'}`}
-            style={active ? { background: 'linear-gradient(135deg, #facc15 0%, #f59e0b 100%)', boxShadow: '0 0 14px rgba(250,204,21,0.6)', transform: 'scale(1.12)' } : {}}>
-            {label}
+            className={`text-xs font-bold px-2.5 py-1.5 rounded-md transition-all duration-200 select-none whitespace-nowrap ${active ? 'text-gray-950' : isCombat && inCombatGroup ? 'text-orange-400' : 'text-gray-600'}`}
+            style={active ? { background: 'linear-gradient(135deg, #facc15 0%, #f59e0b 100%)', boxShadow: '0 0 14px rgba(250,204,21,0.6)', transform: 'scale(1.12)' } : (isCombat && inCombatGroup) ? { background: 'rgba(251,146,60,0.1)', border: '1px solid rgba(251,146,60,0.2)', borderRadius: 6 } : {}}>
+            {displayLabel}
           </span>
         );
       })}
@@ -921,17 +930,6 @@ const C_LW_BASE = 112, C_LH_BASE = 157; // lands slightly smaller
 const C_HGAP = 4, C_RGAP = 16;
 const C_LBLW = 80;
 
-// Blocker zone overlay dimensions (shown on opponent mats during combat)
-const BLOCKER_CARD_W = 90;
-const BLOCKER_CARD_H = Math.round(BLOCKER_CARD_W * C_H_BASE / C_W_BASE); // ~126
-const BLOCKER_ZONE_H = BLOCKER_CARD_H + 38;
-
-interface ConfirmedBlockerEntry {
-  defendingUserId: string;
-  defendingPlayerName: string;
-  blockers: { instanceId: string; name: string; imageUri: string; power?: string; toughness?: string; counters?: Record<string, number>; typeLine?: string }[];
-}
-
 function cardSizeForZone(_groupCount: number, isLand: boolean, _zoneW: number, cardBase = C_W_BASE): { cW: number; cH: number } {
   const cW = isLand ? Math.round(cardBase * C_LW_BASE / C_W_BASE) : cardBase;
   const cH = Math.round(cW * C_H_BASE / C_W_BASE);
@@ -1169,13 +1167,285 @@ function ZoneHeader({ player, color, isMonarch }: { player: PersonalPlayerState;
   );
 }
 
+// ── Combat Panel ─────────────────────────────────────────────────────────────
+
+interface CombatPanelProps {
+  phase: TurnPhase;
+  combatState: PersonalCombatState | null;
+  isMyTurn: boolean;
+  myUserId: string;
+  myBattlefield: GameCard[];
+  opponentPlayers: PersonalPlayerState[];
+  selectedAttackers: Set<string>;
+  attackerTargets: Map<string, string>;
+  selectedBlockerToAssign: string | null;
+  blockerAssignments: Map<string, string>;
+  onToggleAttacker: (id: string) => void;
+  onSetAttackerTarget: (attackerId: string, targetUserId: string) => void;
+  onConfirmAttackers: () => void;
+  onSelectBlockerToAssign: (id: string | null) => void;
+  onAssignBlocker: (attackerId: string) => void;
+  onConfirmBlockers: () => void;
+  onEndPhase: () => void;
+}
+
+function CombatPanel({
+  phase, combatState, isMyTurn, myUserId, myBattlefield, opponentPlayers,
+  selectedAttackers, attackerTargets, selectedBlockerToAssign, blockerAssignments,
+  onToggleAttacker, onSetAttackerTarget, onConfirmAttackers,
+  onSelectBlockerToAssign, onAssignBlocker, onConfirmBlockers, onEndPhase,
+}: CombatPanelProps) {
+  const COMBAT_PHASES: TurnPhase[] = ['begin_combat','declare_attackers','declare_blockers','damage','end_combat'];
+  if (!COMBAT_PHASES.includes(phase)) return null;
+
+  const panelStyle: React.CSSProperties = {
+    position: 'fixed', bottom: 240, left: '50%', transform: 'translateX(-50%)',
+    zIndex: 200, minWidth: 360, maxWidth: 640,
+    background: 'rgba(6,9,18,0.96)', backdropFilter: 'blur(12px)',
+    border: '1px solid rgba(251,146,60,0.4)', borderRadius: 14,
+    padding: '14px 18px', boxShadow: '0 8px 40px rgba(0,0,0,0.9), 0 0 24px rgba(251,146,60,0.1)',
+  };
+  const btnBase: React.CSSProperties = {
+    padding: '8px 18px', borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer', transition: 'all 0.15s',
+  };
+  const primaryBtn: React.CSSProperties = {
+    ...btnBase,
+    background: 'linear-gradient(135deg, #ea580c, #c2410c)',
+    border: '1px solid rgba(251,146,60,0.6)', color: '#fff',
+    boxShadow: '0 0 14px rgba(251,146,60,0.3)',
+  };
+  const ghostBtn: React.CSSProperties = {
+    ...btnBase,
+    background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: '#9ca3af',
+  };
+
+  if (phase === 'begin_combat') {
+    return (
+      <div style={panelStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <span style={{ fontSize: 13, color: '#fb923c', fontWeight: 700 }}>⚔️ Combat Beginning — players may cast instants</span>
+          {isMyTurn && (
+            <button style={primaryBtn} onClick={onEndPhase}>Next Phase →</button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'declare_attackers') {
+    if (isMyTurn) {
+      const selectedList = Array.from(selectedAttackers);
+      const needsTargets = opponentPlayers.length > 1;
+      return (
+        <div style={panelStyle}>
+          <p style={{ fontSize: 11, color: '#fb923c', fontWeight: 700, marginBottom: 8, letterSpacing: 0.5 }}>⚔️ DECLARE ATTACKERS</p>
+          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 10 }}>
+            Click your untapped creatures on the battlefield to select attackers.
+          </p>
+          {selectedList.length > 0 && needsTargets && (
+            <div style={{ marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {selectedList.map(attackerId => {
+                const card = myBattlefield.find(c => c.instanceId === attackerId);
+                return (
+                  <div key={attackerId} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 11, color: '#e5e7eb', flex: 1 }}>{card?.name ?? attackerId.slice(0,8)}</span>
+                    <select
+                      value={attackerTargets.get(attackerId) ?? ''}
+                      onChange={e => onSetAttackerTarget(attackerId, e.target.value)}
+                      style={{ fontSize: 11, background: '#1e293b', border: '1px solid #334155', color: '#e5e7eb', borderRadius: 6, padding: '3px 6px' }}>
+                      <option value="">Select target…</option>
+                      {opponentPlayers.map(p => (
+                        <option key={p.userId} value={p.userId}>{p.playerName}</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button style={{ ...primaryBtn, opacity: selectedList.length === 0 ? 0.4 : 1 }}
+              disabled={selectedList.length === 0}
+              onClick={onConfirmAttackers}>
+              ⚔️ Confirm Attackers ({selectedList.length})
+            </button>
+            <button style={ghostBtn} onClick={onConfirmAttackers}>Skip Attack</button>
+          </div>
+        </div>
+      );
+    } else {
+      const attacker = combatState?.attacks[0];
+      return (
+        <div style={panelStyle}>
+          <span style={{ fontSize: 13, color: '#fb923c', fontWeight: 700 }}>
+            ⏳ Waiting for {attacker?.attackingPlayerName ?? 'active player'} to declare attackers…
+          </span>
+        </div>
+      );
+    }
+  }
+
+  if (phase === 'declare_blockers') {
+    const amTargeted = combatState?.attacks.some(a => a.targetUserId === myUserId) ?? false;
+    if (amTargeted) {
+      const myUntappedCreatures = myBattlefield.filter(c =>
+        (c.typeLine ?? '').includes('Creature') && !c.tapped
+      );
+      const attacks = combatState?.attacks ?? [];
+      return (
+        <div style={panelStyle}>
+          <p style={{ fontSize: 11, color: '#f87171', fontWeight: 700, marginBottom: 8 }}>🛡 DECLARE BLOCKERS</p>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+            {attacks.map(atk => {
+              const assignedBlockerId = Array.from(blockerAssignments.entries()).find(([,aid]) => aid === atk.attackerId)?.[0];
+              const assignedCard = assignedBlockerId ? myBattlefield.find(c => c.instanceId === assignedBlockerId) : null;
+              return (
+                <div key={atk.attackerId} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  <div style={{ position: 'relative', width: 60, height: 84, borderRadius: 6, overflow: 'hidden',
+                    border: '2px solid rgba(239,68,68,0.8)' }}>
+                    {atk.attackerImage
+                      ? <img src={atk.attackerImage} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : <div style={{ width: '100%', height: '100%', background: '#1f2937', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <span style={{ fontSize: 7, color: '#6b7280', textAlign: 'center', padding: 2 }}>{atk.attackerName}</span>
+                        </div>}
+                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.8)',
+                      fontSize: 7, color: '#f87171', textAlign: 'center', padding: 1, fontWeight: 700 }}>ATK</div>
+                  </div>
+                  <span style={{ fontSize: 8, color: '#9ca3af', textAlign: 'center', maxWidth: 60,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{atk.attackerName}</span>
+                  {assignedCard ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                      <div style={{ width: 50, height: 70, borderRadius: 5, overflow: 'hidden', border: '2px solid rgba(74,222,128,0.8)' }}>
+                        {assignedCard.imageUri
+                          ? <img src={assignedCard.imageUri} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          : <div style={{ width: '100%', height: '100%', background: '#1f2937' }} />}
+                      </div>
+                      <button onClick={() => {
+                        setBlockerAssignments_NOOP: void 0;
+                        onAssignBlocker(''); // signal to remove
+                        const newMap = new Map(blockerAssignments);
+                        newMap.delete(assignedBlockerId!);
+                        onSelectBlockerToAssign(null);
+                      }}
+                        style={{ fontSize: 8, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer' }}>
+                        × Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => selectedBlockerToAssign ? onAssignBlocker(atk.attackerId) : undefined}
+                      style={{ fontSize: 9, padding: '3px 8px', borderRadius: 5, cursor: 'pointer',
+                        background: selectedBlockerToAssign ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.05)',
+                        border: selectedBlockerToAssign ? '1px solid rgba(74,222,128,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                        color: selectedBlockerToAssign ? '#86efac' : '#6b7280' }}>
+                      {selectedBlockerToAssign ? '→ Block here' : 'No blocker'}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {myUntappedCreatures.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <p style={{ fontSize: 10, color: '#6b7280', marginBottom: 4 }}>Select a creature to block with:</p>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {myUntappedCreatures.map(c => {
+                  const isSelected = selectedBlockerToAssign === c.instanceId;
+                  const isAssigned = blockerAssignments.has(c.instanceId);
+                  return (
+                    <button key={c.instanceId}
+                      onClick={() => onSelectBlockerToAssign(isSelected ? null : c.instanceId)}
+                      disabled={isAssigned}
+                      style={{ fontSize: 10, padding: '3px 8px', borderRadius: 5, cursor: isAssigned ? 'default' : 'pointer',
+                        opacity: isAssigned ? 0.4 : 1,
+                        background: isSelected ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.05)',
+                        border: isSelected ? '1px solid rgba(74,222,128,0.6)' : '1px solid rgba(255,255,255,0.12)',
+                        color: isSelected ? '#86efac' : '#d1d5db' }}>
+                      {c.name.split(',')[0]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          <button style={primaryBtn} onClick={onConfirmBlockers}>
+            🛡 Confirm Blockers ({blockerAssignments.size})
+          </button>
+        </div>
+      );
+    } else if (isMyTurn) {
+      return (
+        <div style={panelStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+            <span style={{ fontSize: 13, color: '#fb923c', fontWeight: 700 }}>⏳ Waiting for defenders to declare blockers…</span>
+            <button style={ghostBtn} onClick={onEndPhase}>Skip to Damage →</button>
+          </div>
+        </div>
+      );
+    } else {
+      return (
+        <div style={panelStyle}>
+          <span style={{ fontSize: 13, color: '#9ca3af' }}>⏳ Waiting for defenders to declare blockers…</span>
+        </div>
+      );
+    }
+  }
+
+  if (phase === 'damage') {
+    const attacks = combatState?.attacks ?? [];
+    const blocks = combatState?.blocks ?? [];
+    return (
+      <div style={panelStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
+          <p style={{ fontSize: 11, color: '#fb923c', fontWeight: 700 }}>💥 DAMAGE STEP</p>
+          {isMyTurn && <button style={primaryBtn} onClick={onEndPhase}>Resolve Damage →</button>}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {attacks.map(atk => {
+            const assignedBlocks = blocks.filter(b => b.blockingAttackerId === atk.attackerId);
+            return (
+              <div key={atk.attackerId} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#e5e7eb' }}>
+                <span style={{ color: '#f87171', fontWeight: 700 }}>⚔️ {atk.attackerName}</span>
+                <span style={{ color: '#6b7280' }}>→</span>
+                {assignedBlocks.length === 0 ? (
+                  <span style={{ color: '#facc15', fontWeight: 700 }}>UNBLOCKED ({atk.targetPlayerName})</span>
+                ) : (
+                  <span style={{ color: '#86efac' }}>blocked by {assignedBlocks.map(b => b.blockerName).join(', ')}</span>
+                )}
+              </div>
+            );
+          })}
+          {attacks.length === 0 && <span style={{ fontSize: 11, color: '#4b5563' }}>No attackers declared.</span>}
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'end_combat') {
+    return (
+      <div style={panelStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <span style={{ fontSize: 13, color: '#fb923c', fontWeight: 700 }}>⚔️ End of Combat</span>
+          {isMyTurn && <button style={primaryBtn} onClick={onEndPhase}>End Combat →</button>}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 // ── Shared table canvas ───────────────────────────────────────────────────────
 
 interface TableCanvasProps {
   me: PersonalPlayerState;
   opponents: PersonalPlayerState[];
-  isDefendingPhase: boolean;
-  confirmedBlockers: ConfirmedBlockerEntry[];
+  combatPhase: TurnPhase | null;
+  combatState: PersonalCombatState | null;
+  selectedAttackers: Set<string>;
+  isMyTurn: boolean;
+  myUserId: string;
+  onToggleAttacker: (id: string) => void;
   onTapCard: (id: string) => void;
   onGraveyardCard: (id: string) => void;
   onExileCard: (id: string) => void;
@@ -1200,7 +1470,7 @@ interface TableCanvasProps {
 }
 
 function TableCanvas({
-  me, opponents, isDefendingPhase, confirmedBlockers,
+  me, opponents, combatPhase, combatState, selectedAttackers, isMyTurn, myUserId, onToggleAttacker,
   onTapCard, onGraveyardCard, onExileCard, onReturnCmdCard, onReturnHandCard, onGiveControl, onDragStartCard,
   onPlayCard, onHover, onHoverEnd, onBfCardHover, onUpdateCounter, onSetPt, onSetKeywords,
   onDropToGy, onDropToEx, onOpenGy, onOpenEx, gyCards, exCards, monarchSocketId,
@@ -1211,9 +1481,6 @@ function TableCanvas({
   const [overBf, setOverBf] = useState(false);
   const [overGy, setOverGy]       = useState(false);
   const [overEx, setOverEx]       = useState(false);
-  const [blockerCards, setBlockerCards] = useState<GameCard[]>([]);
-  const [overBlockers, setOverBlockers] = useState(false);
-  const [blockersDeclared, setBlockersDeclared] = useState(false);
   const [stackPopover, setStackPopover] = useState<{ groupIds: string[]; isMyCard: boolean; canvasX: number; canvasY: number; cW: number; cH: number } | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   // Stable ref so wheel / pan handlers always see current zoom+pan without stale closures
@@ -1295,19 +1562,12 @@ function TableCanvas({
     setZoom(z);
   }
 
-  useEffect(() => {
-    if (!isDefendingPhase) { setBlockerCards([]); setBlockersDeclared(false); }
-  }, [isDefendingPhase]);
-
   // Card dimensions derived from user-controlled cardSize
   const cardW = cardSize;
   const cardH = Math.round(cardSize * C_H_BASE / C_W_BASE);
 
-  const blockerIdSet = new Set(blockerCards.map(c => c.instanceId));
-  const BLOCK_ZONE_H = cardH + 44;
-  const rowBaseY = MY_LABEL_H + (isDefendingPhase ? BLOCK_ZONE_H + 8 : 0);
-  const battlefieldMinusBlockers = me.battlefield.filter(c => !blockerIdSet.has(c.instanceId));
-  const myRows    = buildCRows(battlefieldMinusBlockers, TYPE_ROWS, layout.my.w, cardSize);
+  const rowBaseY = MY_LABEL_H;
+  const myRows    = buildCRows(me.battlefield, TYPE_ROWS, layout.my.w, cardSize);
   const myCardMap = new Map<string, GameCard>(me.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
   return (
@@ -1440,6 +1700,14 @@ function TableCanvas({
                               </div>
                             )}
                             <PtBar card={card} />
+                            {/* Attacker indicator from combatState */}
+                            {combatState?.attacks.some(a => a.attackerId === slot.topId) && (
+                              <div style={{ position: 'absolute', top: 2, left: 2, zIndex: 60,
+                                background: 'rgba(239,68,68,0.9)', borderRadius: 4, padding: '1px 4px',
+                                fontSize: 9, fontWeight: 900, color: '#fff', pointerEvents: 'none' }}>
+                                ⚔️ ATK
+                              </div>
+                            )}
                           </div>
                           {/* Stack badge — bottom-right corner, only for N > 1 */}
                           {stackN > 1 && (
@@ -1492,70 +1760,6 @@ function TableCanvas({
                 </div>
               )}
 
-              {/* Confirmed blockers overlay — visible to all players during combat */}
-              {(() => {
-                const entry = confirmedBlockers.find(e => e.defendingUserId === player.userId);
-                if (!entry) return null;
-                return (
-                  <div style={{
-                    position: 'absolute', bottom: 44, left: 12, right: 12,
-                    height: BLOCKER_ZONE_H,
-                    background: 'rgba(20,5,5,0.92)',
-                    border: '2px solid rgba(239,68,68,0.9)',
-                    borderRadius: 10,
-                    boxShadow: '0 0 32px rgba(239,68,68,0.5), inset 0 0 20px rgba(239,68,68,0.08)',
-                    zIndex: 8, overflow: 'hidden', display: 'flex', flexDirection: 'column',
-                  }}>
-                    <div style={{ padding: '4px 12px', borderBottom: '1px solid rgba(239,68,68,0.28)',
-                      display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                      <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: 1.2,
-                        color: '#f87171', textTransform: 'uppercase' }}>
-                        🛡 {entry.defendingPlayerName} blocking with:
-                      </span>
-                      <span style={{ fontSize: 9, color: 'rgba(248,113,113,0.65)' }}>
-                        {entry.blockers.length} creature{entry.blockers.length !== 1 ? 's' : ''}
-                      </span>
-                    </div>
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6,
-                      padding: '4px 12px', overflowX: 'auto', overflowY: 'hidden' }}>
-                      {entry.blockers.map(card => (
-                        <div key={card.instanceId} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                          <div style={{
-                            width: BLOCKER_CARD_W, height: BLOCKER_CARD_H,
-                            position: 'relative', borderRadius: 6, overflow: 'hidden',
-                            border: '2px solid rgba(239,68,68,0.9)',
-                            boxShadow: '0 0 16px rgba(239,68,68,0.6)',
-                          }}>
-                            {card.imageUri ? (
-                              <img src={card.imageUri} alt={card.name}
-                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                onMouseEnter={() => onHover(card as GameCard)}
-                                onMouseLeave={onHoverEnd}
-                              />
-                            ) : (
-                              <div style={{ width: '100%', height: '100%', background: '#1f2937',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <span style={{ fontSize: 7, color: '#6b7280', textAlign: 'center', padding: 2 }}>{card.name}</span>
-                              </div>
-                            )}
-                            {card.power != null && card.toughness != null && (card.typeLine ?? '').includes('Creature') && (
-                              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 18,
-                                background: 'rgba(0,0,0,0.88)', display: 'flex', alignItems: 'center',
-                                justifyContent: 'center', fontSize: 11, fontWeight: 800, color: '#f1f5f9' }}>
-                                {card.power}/{card.toughness}
-                              </div>
-                            )}
-                          </div>
-                          <span style={{ fontSize: 8, fontWeight: 900, letterSpacing: 1, color: '#f87171',
-                            textTransform: 'uppercase', textShadow: '0 0 6px rgba(239,68,68,0.8)' }}>
-                            BLOCKING
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
             </div>
           );
         })}
@@ -1666,6 +1870,27 @@ function TableCanvas({
                           onSetPt={(power, toughness) => onSetPt(card.instanceId, power, toughness)}
                           onSetKeywords={(kws) => onSetKeywords(card.instanceId, kws)}
                         />
+                        {/* Combat attacker overlay */}
+                        {combatPhase === 'declare_attackers' && isMyTurn && !card.tapped && (
+                          <div
+                            onClick={(e) => { e.stopPropagation(); e.preventDefault(); onToggleAttacker(slot.topId); }}
+                            style={{
+                              position: 'absolute', inset: 0, zIndex: 60, cursor: 'pointer', borderRadius: 6,
+                              border: selectedAttackers.has(slot.topId)
+                                ? '3px solid rgba(239,68,68,0.95)'
+                                : '2px solid rgba(250,204,21,0.5)',
+                              boxShadow: selectedAttackers.has(slot.topId)
+                                ? '0 0 18px rgba(239,68,68,0.7), inset 0 0 10px rgba(239,68,68,0.15)'
+                                : '0 0 10px rgba(250,204,21,0.35)',
+                              background: selectedAttackers.has(slot.topId) ? 'rgba(239,68,68,0.08)' : 'rgba(250,204,21,0.04)',
+                            }}
+                            onMouseDown={e => e.stopPropagation()}
+                          >
+                            {selectedAttackers.has(slot.topId) && (
+                              <div style={{ position: 'absolute', top: 4, right: 4, fontSize: 16, lineHeight: 1 }}>⚔️</div>
+                            )}
+                          </div>
+                        )}
                       </div>
                       {/* Stack badge — bottom-right corner, only for N > 1 */}
                       {stackN > 1 && (
@@ -1693,105 +1918,6 @@ function TableCanvas({
               })}
             </React.Fragment>
           ))}
-
-          {/* ── Blocking Zone card tray (during opponent's combat) ── */}
-          {isDefendingPhase && (
-            <div style={{
-              position: 'absolute', left: 14, right: 14, top: MY_LABEL_H + 4, height: BLOCK_ZONE_H,
-              border: blockersDeclared ? '2px solid rgba(134,239,172,0.7)' : '2px solid rgba(239,68,68,0.7)',
-              borderRadius: 10, zIndex: 10,
-              background: overBlockers ? 'rgba(239,68,68,0.13)' : 'rgba(15,10,10,0.75)',
-              boxShadow: blockersDeclared ? '0 0 16px rgba(134,239,172,0.15)' : '0 0 18px rgba(239,68,68,0.25)',
-              transition: 'background 0.15s',
-              display: 'flex', flexDirection: 'column',
-            }}
-              onDragOver={(e) => { e.preventDefault(); setOverBlockers(true); }}
-              onDragLeave={() => setOverBlockers(false)}
-              onDrop={(e) => {
-                e.preventDefault(); setOverBlockers(false);
-                try {
-                  const d: DragData = JSON.parse(e.dataTransfer.getData('application/json'));
-                  if (d.source !== 'battlefield') return;
-                  const card = me.battlefield.find(c => c.instanceId === d.instanceId);
-                  if (card && card.typeLine?.includes('Creature') && !card.tapped && !blockerIdSet.has(d.instanceId)) {
-                    setBlockerCards(prev => [...prev, card]);
-                  }
-                } catch { /* */ }
-              }}>
-              {/* Header */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '5px 12px', borderBottom: '1px solid rgba(239,68,68,0.2)', flexShrink: 0 }}
-                onMouseDown={e => e.stopPropagation()}>
-                <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.8,
-                  color: blockersDeclared ? '#86efac' : '#f87171' }}>
-                  {blockersDeclared
-                    ? `✓ ${blockerCards.length} blocker${blockerCards.length !== 1 ? 's' : ''} confirmed`
-                    : `🛡 Blocking Zone${blockerCards.length > 0 ? ` — ${blockerCards.length} creature${blockerCards.length !== 1 ? 's' : ''}` : ' — drag untapped creatures here'}`}
-                </span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {blockerCards.length > 0 && !blockersDeclared && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); socket.emit('game:declare_blockers', { blockerIds: blockerCards.map(c => c.instanceId) }); setBlockersDeclared(true); }}
-                      onMouseDown={e => e.stopPropagation()}
-                      style={{ fontSize: 10, fontWeight: 800, padding: '3px 12px', borderRadius: 6,
-                        background: 'rgba(239,68,68,0.25)', border: '1px solid rgba(239,68,68,0.6)',
-                        color: '#fca5a5', cursor: 'pointer' }}>
-                      Confirm Blockers
-                    </button>
-                  )}
-                  {blockerCards.length > 0 && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setBlockerCards([]); setBlockersDeclared(false); }}
-                      onMouseDown={e => e.stopPropagation()}
-                      style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 6,
-                        background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)',
-                        color: '#94a3b8', cursor: 'pointer' }}>
-                      Clear
-                    </button>
-                  )}
-                </div>
-              </div>
-              {/* Cards */}
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: C_HGAP,
-                padding: '4px 12px', overflowX: 'auto', overflowY: 'hidden' }}
-                onMouseDown={e => e.stopPropagation()}>
-                {blockerCards.length === 0 ? (
-                  <span style={{ color: 'rgba(239,68,68,0.3)', fontSize: 11, fontStyle: 'italic', margin: 'auto' }}>
-                    Drop untapped creatures here
-                  </span>
-                ) : blockerCards.map(card => (
-                  <div key={card.instanceId} style={{ position: 'relative', flexShrink: 0 }}
-                    title="Right-click → send to graveyard"
-                    onContextMenu={(e) => {
-                      e.preventDefault(); e.stopPropagation();
-                      setBlockerCards(prev => prev.filter(c => c.instanceId !== card.instanceId));
-                      onGraveyardCard(card.instanceId);
-                    }}>
-                    <TappedCardWrapper card={card} cardW={cardW} cardH={cardH}>
-                      <div className="w-full h-full">
-                        {card.faceDown ? (
-                          <div className="w-full h-full rounded-lg flex items-center justify-center"
-                            style={{ background: '#1e1b4b', border: '2px solid rgba(239,68,68,0.6)' }}>
-                            <span style={{ fontSize: 22, opacity: 0.3 }}>🂠</span>
-                          </div>
-                        ) : card.imageUri ? (
-                          <img src={card.imageUri} alt={card.name} className="w-full h-full object-cover rounded-lg"
-                            style={{ border: '2px solid rgba(239,68,68,0.65)',
-                              boxShadow: '0 0 10px rgba(239,68,68,0.4)' }} />
-                        ) : (
-                          <div className="w-full h-full rounded-lg flex items-center justify-center"
-                            style={{ background: '#1f2937', border: '2px solid rgba(239,68,68,0.6)' }}>
-                            <span style={{ fontSize: 9, color: '#6b7280' }}>{card.name.slice(0, 10)}</span>
-                          </div>
-                        )}
-                      </div>
-                    </TappedCardWrapper>
-                    <PtBar card={card} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* ── Stack popover ── */}
           {stackPopover && (() => {
@@ -2231,7 +2357,10 @@ export default function GameBoardPage() {
   const [diceResult, setDiceResult] = useState<{ playerName: string; sides: number; result: number } | null>(null);
   const diceResultTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [confirmedBlockers, setConfirmedBlockers] = useState<ConfirmedBlockerEntry[]>([]);
+  const [selectedAttackers, setSelectedAttackers] = useState<Set<string>>(new Set());
+  const [attackerTargets, setAttackerTargets] = useState<Map<string, string>>(new Map());
+  const [selectedBlockerToAssign, setSelectedBlockerToAssign] = useState<string | null>(null);
+  const [blockerAssignments, setBlockerAssignments] = useState<Map<string, string>>(new Map());
   const [timingToast, setTimingToast] = useState<string | null>(null);
   const [overHand, setOverHand] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2299,19 +2428,21 @@ export default function GameBoardPage() {
       if (announcementTimer.current) clearTimeout(announcementTimer.current);
       announcementTimer.current = setTimeout(() => setAnnouncement(null), 6000);
     });
-    socket.on('blockersConfirmed', ({ defendingUserId, defendingPlayerName, blockers }) => {
-      console.log(`[blockersConfirmed] received — ${defendingPlayerName} blocking with`, blockers.map(b => b.name));
-      setConfirmedBlockers(prev => {
-        const filtered = prev.filter(e => e.defendingUserId !== defendingUserId);
-        return [...filtered, { defendingUserId, defendingPlayerName, blockers }];
-      });
-      setTimingToast(`🛡 ${defendingPlayerName} is blocking with ${blockers.length} creature${blockers.length !== 1 ? 's' : ''}`);
+    socket.on('attackersDeclared', ({ attackingPlayerName, count }) => {
+      setTimingToast(`⚔️ ${attackingPlayerName} declared ${count} attacker${count !== 1 ? 's' : ''}`);
       if (toastTimer.current) clearTimeout(toastTimer.current);
-      toastTimer.current = setTimeout(() => setTimingToast(null), 4000);
+      toastTimer.current = setTimeout(() => setTimingToast(null), 3000);
+    });
+    socket.on('blockersDeclared', ({ defendingPlayerName, count }) => {
+      setTimingToast(`🛡 ${defendingPlayerName} declared ${count} blocker${count !== 1 ? 's' : ''}`);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setTimingToast(null), 3000);
     });
     socket.on('combatEnded', () => {
-      console.log('[combatEnded] received — clearing blockers');
-      setConfirmedBlockers([]);
+      setSelectedAttackers(new Set());
+      setAttackerTargets(new Map());
+      setSelectedBlockerToAssign(null);
+      setBlockerAssignments(new Map());
     });
     socket.on('cardCounterUpdate', ({ playerId, instanceId, counters }) => {
       setGameState((prev) => {
@@ -2339,7 +2470,8 @@ export default function GameBoardPage() {
       socket.off('game:dice_result');
       socket.off('game:error');
       socket.off('game:announcement');
-      socket.off('blockersConfirmed');
+      socket.off('attackersDeclared');
+      socket.off('blockersDeclared');
       socket.off('combatEnded');
       socket.off('cardCounterUpdate');
       if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -2354,11 +2486,14 @@ export default function GameBoardPage() {
     }
   }, [gameState]);
 
-  // Clear confirmed blockers whenever the phase leaves combat (handles reconnect race)
+  // Clear combat selection when leaving combat sub-steps
   useEffect(() => {
-    if (gameState?.phase && gameState.phase !== 'combat') {
-      setConfirmedBlockers([]);
-    }
+    const phase = gameState?.phase;
+    if (!phase || ['begin_combat','declare_attackers','declare_blockers','damage','end_combat'].includes(phase)) return;
+    setSelectedAttackers(new Set());
+    setAttackerTargets(new Map());
+    setSelectedBlockerToAssign(null);
+    setBlockerAssignments(new Map());
   }, [gameState?.phase]);
 
   // Keyboard shortcuts for hovered battlefield card
@@ -2512,6 +2647,30 @@ export default function GameBoardPage() {
     setLandsPlayable:    (delta: number) => socket.emit('game:set_lands_playable', { delta }),
   };
 
+  // ── Combat helpers ────────────────────────────────────────────────────────────
+
+  const opponentPlayers = opponents.filter(p => !p.eliminated);
+
+  function handleDeclareAttackers() {
+    const aliveOpponents = opponents.filter(p => !p.eliminated);
+    const attacks = Array.from(selectedAttackers).map(attackerId => {
+      const targetUserId = attackerTargets.get(attackerId) ?? aliveOpponents[0]?.userId ?? '';
+      return { attackerId, targetUserId };
+    });
+    socket.emit('game:declare_attackers', { attacks });
+    setSelectedAttackers(new Set());
+    setAttackerTargets(new Map());
+  }
+
+  function handleDeclareBlockers() {
+    const blocks = Array.from(blockerAssignments.entries()).map(([blockerId, blockingAttackerId]) => ({
+      blockerId, blockingAttackerId,
+    }));
+    socket.emit('game:declare_blockers', { blocks });
+    setSelectedBlockerToAssign(null);
+    setBlockerAssignments(new Map());
+  }
+
   // ── Timing helper ─────────────────────────────────────────────────────────────
 
   function cardTimingStatus(card: GameCard): { playable: boolean; reason: string } {
@@ -2643,13 +2802,42 @@ export default function GameBoardPage() {
         </div>
       </header>
 
+      {/* ── Combat Panel ── */}
+      <CombatPanel
+        phase={gameState.phase}
+        combatState={gameState.combatState}
+        isMyTurn={isMyTurn}
+        myUserId={user?.id ?? ''}
+        myBattlefield={me.battlefield}
+        opponentPlayers={opponentPlayers}
+        selectedAttackers={selectedAttackers}
+        attackerTargets={attackerTargets}
+        selectedBlockerToAssign={selectedBlockerToAssign}
+        blockerAssignments={blockerAssignments}
+        onToggleAttacker={(id) => setSelectedAttackers(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
+        onSetAttackerTarget={(attackerId, targetUserId) => setAttackerTargets(prev => { const m = new Map(prev); m.set(attackerId, targetUserId); return m; })}
+        onConfirmAttackers={handleDeclareAttackers}
+        onSelectBlockerToAssign={setSelectedBlockerToAssign}
+        onAssignBlocker={(attackerId) => {
+          if (!selectedBlockerToAssign) return;
+          setBlockerAssignments(prev => { const m = new Map(prev); m.set(selectedBlockerToAssign, attackerId); return m; });
+          setSelectedBlockerToAssign(null);
+        }}
+        onConfirmBlockers={handleDeclareBlockers}
+        onEndPhase={emit.endPhase}
+      />
+
       {/* ── Shared table canvas (fills space between header and info bar) ── */}
       <div className="flex-1 overflow-hidden min-h-0">
         <TableCanvas
           me={me}
           opponents={opponents}
-          isDefendingPhase={!isMyTurn && gameState.phase === 'combat'}
-          confirmedBlockers={confirmedBlockers}
+          combatPhase={['begin_combat','declare_attackers','declare_blockers','damage','end_combat'].includes(gameState.phase) ? gameState.phase : null}
+          combatState={gameState.combatState}
+          selectedAttackers={selectedAttackers}
+          isMyTurn={isMyTurn}
+          myUserId={user?.id ?? ''}
+          onToggleAttacker={(id) => setSelectedAttackers(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
           onTapCard={emit.tapCard}
           onGraveyardCard={interceptGraveyard}
           onExileCard={interceptExile}
