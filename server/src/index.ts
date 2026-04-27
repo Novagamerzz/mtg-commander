@@ -1136,9 +1136,21 @@ io.on('connection', (socket) => {
 
   socket.on('game:declare_attackers', ({ attacks }) => {
     const game = getGame(socket.id);
-    if (!game || game.phase !== 'declare_attackers') return;
+    if (!game) return;
+    // Allow empty-attacks skip from begin_combat as well as declare_attackers
+    if (game.phase !== 'declare_attackers' && !(attacks.length === 0 && game.phase === 'begin_combat')) return;
     const player = game.players.find(p => p.socketId === socket.id);
     if (!player || game.players[game.activePlayerIndex].socketId !== socket.id) return;
+
+    if (attacks.length === 0) {
+      game.phase = 'main2';
+      game.combatState = undefined;
+      appendLog(game, 'No attackers declared — skipping to Main 2');
+      io.to(game.roomId).emit('game:announcement', { message: 'No attackers declared — skipping to Main 2' });
+      broadcastGame(game);
+      return;
+    }
+
     // Tap all attacking creatures
     for (const atk of attacks) {
       const card = player.battlefield.find(c => c.instanceId === atk.attackerId);

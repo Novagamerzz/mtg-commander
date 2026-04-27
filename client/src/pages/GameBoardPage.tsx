@@ -1431,6 +1431,7 @@ interface CombatPanelProps {
   onToggleAttacker: (id: string) => void;
   onSetAttackerTarget: (attackerId: string, targetUserId: string) => void;
   onConfirmAttackers: () => void;
+  onSkipCombat: () => void;
   onSelectBlockerToAssign: (id: string | null) => void;
   onAssignBlocker: (attackerId: string) => void;
   onRemoveBlocker: (blockerId: string) => void;
@@ -1442,7 +1443,7 @@ interface CombatPanelProps {
 function CombatPanel({
   phase, combatState, isMyTurn, myUserId, myBattlefield, opponentPlayers,
   selectedAttackers, attackerTargets, selectedBlockerToAssign, blockerAssignments,
-  onToggleAttacker, onSetAttackerTarget, onConfirmAttackers,
+  onToggleAttacker, onSetAttackerTarget, onConfirmAttackers, onSkipCombat,
   onSelectBlockerToAssign, onAssignBlocker, onRemoveBlocker, onConfirmBlockers, onResolveDamage, onEndPhase,
 }: CombatPanelProps) {
   const COMBAT_PHASES: TurnPhase[] = ['begin_combat','declare_attackers','declare_blockers','damage','end_combat'];
@@ -1475,7 +1476,10 @@ function CombatPanel({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
           <span style={{ fontSize: 13, color: '#fb923c', fontWeight: 700 }}>⚔️ Combat Beginning — players may cast instants</span>
           {isMyTurn && (
-            <button style={primaryBtn} onClick={onEndPhase}>Next Phase →</button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={ghostBtn} onClick={onSkipCombat}>⏩ Skip Combat</button>
+              <button style={primaryBtn} onClick={onEndPhase}>Next Phase →</button>
+            </div>
           )}
         </div>
       </div>
@@ -1519,7 +1523,7 @@ function CombatPanel({
               onClick={onConfirmAttackers}>
               ⚔️ Confirm Attackers ({selectedList.length})
             </button>
-            <button style={ghostBtn} onClick={onConfirmAttackers}>Skip Attack</button>
+            <button style={ghostBtn} onClick={onSkipCombat}>⏩ Skip Combat</button>
           </div>
         </div>
       );
@@ -2936,6 +2940,12 @@ export default function GameBoardPage() {
     setAttackerTargets(new Map());
   }
 
+  function handleSkipCombat() {
+    socket.emit('game:declare_attackers', { attacks: [] });
+    setSelectedAttackers(new Set());
+    setAttackerTargets(new Map());
+  }
+
   function handleDeclareBlockers() {
     const blocks = Array.from(blockerAssignments.entries()).map(([blockerId, blockingAttackerId]) => ({
       blockerId, blockingAttackerId,
@@ -3100,6 +3110,7 @@ export default function GameBoardPage() {
         onToggleAttacker={(id) => setSelectedAttackers(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
         onSetAttackerTarget={(attackerId, targetUserId) => setAttackerTargets(prev => { const m = new Map(prev); m.set(attackerId, targetUserId); return m; })}
         onConfirmAttackers={handleDeclareAttackers}
+        onSkipCombat={handleSkipCombat}
         onSelectBlockerToAssign={setSelectedBlockerToAssign}
         onAssignBlocker={(attackerId) => {
           if (!selectedBlockerToAssign) return;
