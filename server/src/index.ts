@@ -1199,7 +1199,9 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Return commanders to command zone with tax increment
+    // Return commanders to command zone — do NOT increment commanderCastCount here.
+    // Tax only increases when the commander is CAST (handled in game:cast_commander).
+    // Incrementing here was causing double-taxation: +2 on death and +2 again on next cast.
     for (const instanceId of (deadToCommandZone ?? [])) {
       for (const p of game.players) {
         const idx = p.battlefield.findIndex(c => c.instanceId === instanceId);
@@ -1207,10 +1209,11 @@ io.on('connection', (socket) => {
           const [card] = p.battlefield.splice(idx, 1);
           card.tapped = false;
           p.commandZone.push(card);
-          p.commanderCastCount++;
-          const newTax = p.commanderCastCount * 2;
+          const prevTax = (p.commanderCastCount - 1) * 2; // tax that was paid last cast
+          const newTax = p.commanderCastCount * 2;         // tax for next cast (unchanged)
+          console.log(`[commanderReturned] ${card.name}: castCount=${p.commanderCastCount}, prevTax=+${prevTax} → nextCastTax=+${newTax} (no increment on return)`);
           dead.push({ instanceId, name: card.name, playerName: p.playerName });
-          appendLog(game, `${card.name} returned to command zone (tax now +${newTax})`);
+          appendLog(game, `${card.name} returned to command zone (next cast costs +${newTax})`);
           io.to(game.roomId).emit('commanderReturned', { playerId: p.socketId, commanderName: card.name, newTax });
           break;
         }
