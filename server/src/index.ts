@@ -638,18 +638,16 @@ io.on('connection', (socket) => {
       io.to(game.roomId).emit('combatEnded');
     }
     advancePhase(game);
-    // Auto-skip all combat sub-steps if active player has no untapped creatures
-    if (game.phase === 'begin_combat') {
+    // Skip directly to main2 if the active player has no untapped creatures when
+    // entering begin_combat (from main1) or declare_attackers (from begin_combat).
+    if (game.phase === 'begin_combat' || game.phase === 'declare_attackers') {
       const active = game.players[game.activePlayerIndex];
       const hasAttackers = active.battlefield.some(c => !c.tapped && (c.typeLine ?? '').includes('Creature'));
       if (!hasAttackers) {
-        const COMBAT_PHASES: TurnPhase[] = ['begin_combat', 'declare_attackers', 'declare_blockers', 'damage', 'end_combat'];
-        while (COMBAT_PHASES.includes(game.phase)) {
-          const idx = PHASE_ORDER.indexOf(game.phase);
-          game.phase = PHASE_ORDER[idx + 1] as TurnPhase;
-        }
-        appendLog(game, `${active.playerName} has no untapped creatures — combat skipped`);
-        io.to(game.roomId).emit('game:announcement', { message: '⚔️ No attackers available — combat skipped', type: 'info' });
+        game.phase = 'main2';
+        game.combatState = null;
+        appendLog(game, `${active.playerName} has no untapped creatures — skipping to Main 2`);
+        io.to(game.roomId).emit('game:announcement', { message: 'No creatures — skipping to Main 2', type: 'info' });
       }
     }
     broadcastGame(game);

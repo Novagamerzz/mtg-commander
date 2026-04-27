@@ -1469,6 +1469,11 @@ function CombatPanel({
     ...btnBase,
     background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: '#9ca3af',
   };
+  const skipBtn: React.CSSProperties = {
+    ...btnBase,
+    background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.5)', color: '#a5b4fc',
+    boxShadow: '0 0 10px rgba(99,102,241,0.2)',
+  };
 
   if (phase === 'begin_combat') {
     return (
@@ -1477,7 +1482,7 @@ function CombatPanel({
           <span style={{ fontSize: 13, color: '#fb923c', fontWeight: 700 }}>⚔️ Combat Beginning — players may cast instants</span>
           {isMyTurn && (
             <div style={{ display: 'flex', gap: 8 }}>
-              <button style={ghostBtn} onClick={onSkipCombat}>⏩ Skip Combat</button>
+              <button style={skipBtn} onClick={onSkipCombat}>Skip Combat →</button>
               <button style={primaryBtn} onClick={onEndPhase}>Next Phase →</button>
             </div>
           )}
@@ -1523,7 +1528,7 @@ function CombatPanel({
               onClick={onConfirmAttackers}>
               ⚔️ Confirm Attackers ({selectedList.length})
             </button>
-            <button style={ghostBtn} onClick={onSkipCombat}>⏩ Skip Combat</button>
+            <button style={skipBtn} onClick={onSkipCombat}>Skip Combat →</button>
           </div>
         </div>
       );
