@@ -926,7 +926,7 @@ const BLOCKER_CARD_H = Math.round(BLOCKER_CARD_W * C_H_BASE / C_W_BASE); // ~126
 const BLOCKER_ZONE_H = BLOCKER_CARD_H + 38;
 
 interface ConfirmedBlockerEntry {
-  defendingSocketId: string;
+  defendingUserId: string;
   defendingPlayerName: string;
   blockers: { instanceId: string; name: string; imageUri: string; power?: string; toughness?: string; counters?: Record<string, number>; typeLine?: string }[];
 }
@@ -959,10 +959,20 @@ const KEYWORD_COLOR: Record<string, string> = {
   Reach: '#4ade80', Menace: '#c084fc', Flash: '#34d399',
 };
 
+interface CSlot { topId: string; groupIds: string[]; x: number; }
+
 interface CRow {
   label: string; isLand: boolean;
   y: number; cW: number; cH: number;
-  slots: { id: string; groupSize: number; groupIndex: number; x: number }[];
+  slots: CSlot[];
+}
+
+function stackShadow(depth: number): string | undefined {
+  if (depth <= 0) return undefined;
+  const n = Math.min(depth, 3);
+  return Array.from({ length: n }, (_, i) =>
+    `${(i + 1) * 4}px ${(i + 1) * 4}px 0 #0a0f1a, ${(i + 1) * 4 + 1}px ${(i + 1) * 4 + 1}px 0 rgba(100,116,139,0.35)`
+  ).join(', ');
 }
 
 function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zoneW = CANVAS_W - 40, cardBase = C_W_BASE): CRow[] {
@@ -976,15 +986,12 @@ function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zo
       arr.push(c);
       nameMap.set(c.name, arr);
     }
-    const groupCount = nameMap.size;
-    const { cW, cH } = cardSizeForZone(groupCount, isLand, zoneW, cardBase);
-    const slots: CRow['slots'] = [];
+    const { cW, cH } = cardSizeForZone(nameMap.size, isLand, zoneW, cardBase);
+    const slots: CSlot[] = [];
     let x = C_LBLW;
     for (const [, group] of nameMap) {
-      for (let gi = 0; gi < group.length; gi++) {
-        slots.push({ id: group[gi].instanceId, groupSize: group.length, groupIndex: gi, x: x + gi * (cW + gap) });
-      }
-      x += group.length * (cW + gap);
+      slots.push({ topId: group[0].instanceId, groupIds: group.map(c => c.instanceId), x });
+      x += cW + gap;
     }
     out.push({ label, isLand, y: ry, cW, cH, slots });
     ry += cH + rgap;
@@ -1205,6 +1212,7 @@ function TableCanvas({
   const [blockerCards, setBlockerCards] = useState<GameCard[]>([]);
   const [overBlockers, setOverBlockers] = useState(false);
   const [blockersDeclared, setBlockersDeclared] = useState(false);
+  const [stackPopover, setStackPopover] = useState<{ groupIds: string[]; isMyCard: boolean; canvasX: number; canvasY: number; cW: number; cH: number } | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   // Stable ref so wheel / pan handlers always see current zoom+pan without stale closures
   const camRef = useRef({ zoom: 0.7, pan: { x: 0, y: 0 } });
@@ -1255,6 +1263,7 @@ function TableCanvas({
   // ── Drag empty space to pan ───────────────────────────────────────────────────
   function onBgDown(e: React.MouseEvent) {
     if (e.button !== 0) return;
+    setStackPopover(null);
     e.preventDefault();
     const el = viewportRef.current;
     if (!el) return;
@@ -1353,71 +1362,82 @@ function TableCanvas({
                     </span>
                   </div>
                   {row.slots.map(slot => {
-                    const card = cardMap.get(slot.id);
+                    const card = cardMap.get(slot.topId);
                     if (!card) return null;
-                    const showBadge = slot.groupSize > 1 && slot.groupIndex === slot.groupSize - 1;
+                    const depth = slot.groupIds.length - 1;
+                    const shadow = stackShadow(depth);
+                    const isPopoverOpen = stackPopover?.groupIds[0] === slot.topId && !stackPopover.isMyCard;
                     const oppCounters = card.counters ?? {};
                     const oppHasCounters = Object.values(oppCounters).some((n) => n > 0);
                     const oppKeywords = card.keywords ?? [];
                     return (
-                      <div key={slot.id} style={{
-                        position: 'absolute', left: slot.x, top: OPP_INFO_H + row.y,
-                        zIndex: 2 + slot.groupIndex,
+                      <div key={slot.topId} style={{
+                        position: 'absolute', left: slot.x, top: OPP_INFO_H + row.y, zIndex: 2,
                       }}
                         onMouseDown={e => e.stopPropagation()}>
-                        <TappedCardWrapper card={card} cardW={row.cW} cardH={row.cH}>
-                          <div onMouseEnter={() => onHover(card)} onMouseLeave={onHoverEnd}
-                            className="w-full h-full cursor-default">
-                            {card.faceDown ? (
-                              <div className="w-full h-full rounded flex flex-col items-center justify-center"
-                                style={{ background: 'linear-gradient(135deg, #1e1b4b, #0f172a)',
-                                  border: '1px solid rgba(99,102,241,0.35)' }}>
-                                <span style={{ fontSize: 12, opacity: 0.28 }}>🂠</span>
-                              </div>
-                            ) : card.imageUri ? (
-                              <img src={card.imageUri} className="w-full h-full object-cover rounded"
-                                style={{ opacity: card.tapped ? 0.72 : 1,
-                                  border: card.tapped ? '1px solid rgba(250,204,21,0.4)' : '1px solid rgba(255,255,255,0.08)' }} />
-                            ) : (
-                              <div className="w-full h-full rounded flex items-center justify-center p-0.5"
-                                style={{ background: '#1f2937', border: '1px solid #374151' }}>
-                                <span style={{ fontSize: 6, color: '#6b7280' }}>{card.name.slice(0, 8)}</span>
-                              </div>
-                            )}
-                          </div>
-                        </TappedCardWrapper>
-                        {/* Keyword badges */}
-                        {oppKeywords.length > 0 && (
-                          <div style={{ position: 'absolute', top: 3, left: 3, display: 'flex', flexWrap: 'wrap',
-                            gap: 2, zIndex: 15, pointerEvents: 'none', maxWidth: '90%' }}>
-                            {oppKeywords.map((kw) => (
-                              <span key={kw} style={{
-                                background: `${KEYWORD_COLOR[kw] ?? '#64748b'}33`,
-                                border: `1px solid ${KEYWORD_COLOR[kw] ?? '#64748b'}88`,
-                                color: KEYWORD_COLOR[kw] ?? '#e2e8f0',
-                                borderRadius: 3, padding: '1px 3px', fontSize: 7, fontWeight: 800,
-                              }}>{KEYWORD_ABBR[kw] ?? kw.slice(0, 3).toUpperCase()}</span>
-                            ))}
-                          </div>
-                        )}
-                        {/* Counter badges */}
-                        {oppHasCounters && (
-                          <div style={{ position: 'absolute', bottom: 3, left: 3, display: 'flex', flexWrap: 'wrap',
-                            gap: 2, zIndex: 15, pointerEvents: 'none', maxWidth: '70%' }}>
-                            {Object.entries(oppCounters).filter(([, n]) => n > 0).map(([type, n]) => (
-                              <CounterBadge key={type} type={type} count={n} />
-                            ))}
-                          </div>
-                        )}
-                        {/* P/T bar */}
-                        <PtBar card={card} />
-                        {/* Stack count badge */}
-                        {showBadge && (
-                          <div style={{ position: 'absolute', top: -7, left: -7, zIndex: 30,
-                            background: '#2563eb', color: '#fff', borderRadius: 5,
-                            padding: '1px 5px', fontSize: 10, fontWeight: 900,
-                            border: '2px solid #1e293b', pointerEvents: 'none' }}>
-                            ×{slot.groupSize}
+                        <div style={{ boxShadow: shadow, borderRadius: 6 }}>
+                          <TappedCardWrapper card={card} cardW={row.cW} cardH={row.cH}>
+                            <div onMouseEnter={() => onHover(card)} onMouseLeave={onHoverEnd}
+                              className="w-full h-full cursor-default">
+                              {card.faceDown ? (
+                                <div className="w-full h-full rounded flex flex-col items-center justify-center"
+                                  style={{ background: 'linear-gradient(135deg, #1e1b4b, #0f172a)',
+                                    border: '1px solid rgba(99,102,241,0.35)' }}>
+                                  <span style={{ fontSize: 12, opacity: 0.28 }}>🂠</span>
+                                </div>
+                              ) : card.imageUri ? (
+                                <img src={card.imageUri} className="w-full h-full object-cover rounded"
+                                  style={{ opacity: card.tapped ? 0.72 : 1,
+                                    border: card.tapped ? '1px solid rgba(250,204,21,0.4)' : '1px solid rgba(255,255,255,0.08)' }} />
+                              ) : (
+                                <div className="w-full h-full rounded flex items-center justify-center p-0.5"
+                                  style={{ background: '#1f2937', border: '1px solid #374151' }}>
+                                  <span style={{ fontSize: 6, color: '#6b7280' }}>{card.name.slice(0, 8)}</span>
+                                </div>
+                              )}
+                            </div>
+                          </TappedCardWrapper>
+                          {/* Keyword badges */}
+                          {oppKeywords.length > 0 && (
+                            <div style={{ position: 'absolute', top: 3, left: 3, display: 'flex', flexWrap: 'wrap',
+                              gap: 2, zIndex: 15, pointerEvents: 'none', maxWidth: '90%' }}>
+                              {oppKeywords.map((kw) => (
+                                <span key={kw} style={{
+                                  background: `${KEYWORD_COLOR[kw] ?? '#64748b'}33`,
+                                  border: `1px solid ${KEYWORD_COLOR[kw] ?? '#64748b'}88`,
+                                  color: KEYWORD_COLOR[kw] ?? '#e2e8f0',
+                                  borderRadius: 3, padding: '1px 3px', fontSize: 7, fontWeight: 800,
+                                }}>{KEYWORD_ABBR[kw] ?? kw.slice(0, 3).toUpperCase()}</span>
+                              ))}
+                            </div>
+                          )}
+                          {/* Counter badges */}
+                          {oppHasCounters && (
+                            <div style={{ position: 'absolute', bottom: 3, left: 3, display: 'flex', flexWrap: 'wrap',
+                              gap: 2, zIndex: 15, pointerEvents: 'none', maxWidth: '70%' }}>
+                              {Object.entries(oppCounters).filter(([, n]) => n > 0).map(([type, n]) => (
+                                <CounterBadge key={type} type={type} count={n} />
+                              ))}
+                            </div>
+                          )}
+                          {/* P/T bar */}
+                          <PtBar card={card} />
+                        </div>
+                        {/* Stack badge — clickable to expand */}
+                        {depth > 0 && (
+                          <div onClick={(e) => {
+                            e.stopPropagation();
+                            setStackPopover(isPopoverOpen ? null : {
+                              groupIds: slot.groupIds, isMyCard: false,
+                              canvasX: slot.x, canvasY: OPP_INFO_H + row.y, cW: row.cW, cH: row.cH,
+                            });
+                          }}
+                            style={{ position: 'absolute', top: -7, left: -7, zIndex: 30,
+                              background: '#2563eb', color: '#fff', borderRadius: 5,
+                              padding: '1px 5px', fontSize: 10, fontWeight: 900,
+                              border: `2px solid ${isPopoverOpen ? '#60a5fa' : '#1e293b'}`,
+                              cursor: 'pointer' }}>
+                            ×{slot.groupIds.length}
                           </div>
                         )}
                       </div>
@@ -1453,56 +1473,62 @@ function TableCanvas({
 
               {/* Confirmed blockers overlay — visible to all players during combat */}
               {(() => {
-                const entry = confirmedBlockers.find(e => e.defendingSocketId === player.socketId);
+                const entry = confirmedBlockers.find(e => e.defendingUserId === player.userId);
                 if (!entry) return null;
                 return (
                   <div style={{
                     position: 'absolute', bottom: 44, left: 12, right: 12,
                     height: BLOCKER_ZONE_H,
-                    background: 'rgba(20,5,5,0.9)',
-                    border: '2px solid rgba(239,68,68,0.85)',
+                    background: 'rgba(20,5,5,0.92)',
+                    border: '2px solid rgba(239,68,68,0.9)',
                     borderRadius: 10,
-                    boxShadow: '0 0 28px rgba(239,68,68,0.4), inset 0 0 16px rgba(239,68,68,0.08)',
-                    zIndex: 8,
-                    overflow: 'hidden',
-                    display: 'flex', flexDirection: 'column',
+                    boxShadow: '0 0 32px rgba(239,68,68,0.5), inset 0 0 20px rgba(239,68,68,0.08)',
+                    zIndex: 8, overflow: 'hidden', display: 'flex', flexDirection: 'column',
                   }}>
                     <div style={{ padding: '4px 12px', borderBottom: '1px solid rgba(239,68,68,0.28)',
                       display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                       <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: 1.2,
-                        color: '#f87171', textTransform: 'uppercase' }}>🛡 BLOCKING</span>
+                        color: '#f87171', textTransform: 'uppercase' }}>
+                        🛡 {entry.defendingPlayerName} blocking with:
+                      </span>
                       <span style={{ fontSize: 9, color: 'rgba(248,113,113,0.65)' }}>
                         {entry.blockers.length} creature{entry.blockers.length !== 1 ? 's' : ''}
                       </span>
                     </div>
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4,
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6,
                       padding: '4px 12px', overflowX: 'auto', overflowY: 'hidden' }}>
                       {entry.blockers.map(card => (
-                        <div key={card.instanceId} style={{
-                          flexShrink: 0, width: BLOCKER_CARD_W, height: BLOCKER_CARD_H,
-                          position: 'relative', borderRadius: 6, overflow: 'hidden',
-                          border: '2px solid rgba(239,68,68,0.9)',
-                          boxShadow: '0 0 14px rgba(239,68,68,0.55)',
-                        }}>
-                          {card.imageUri ? (
-                            <img src={card.imageUri} alt={card.name}
-                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                              onMouseEnter={() => onHover(card as GameCard)}
-                              onMouseLeave={onHoverEnd}
-                            />
-                          ) : (
-                            <div style={{ width: '100%', height: '100%', background: '#1f2937',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              <span style={{ fontSize: 7, color: '#6b7280', textAlign: 'center', padding: 2 }}>{card.name}</span>
-                            </div>
-                          )}
-                          {card.power != null && card.toughness != null && (card.typeLine ?? '').includes('Creature') && (
-                            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 18,
-                              background: 'rgba(0,0,0,0.88)', display: 'flex', alignItems: 'center',
-                              justifyContent: 'center', fontSize: 11, fontWeight: 800, color: '#f1f5f9' }}>
-                              {card.power}/{card.toughness}
-                            </div>
-                          )}
+                        <div key={card.instanceId} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                          <div style={{
+                            width: BLOCKER_CARD_W, height: BLOCKER_CARD_H,
+                            position: 'relative', borderRadius: 6, overflow: 'hidden',
+                            border: '2px solid rgba(239,68,68,0.9)',
+                            boxShadow: '0 0 16px rgba(239,68,68,0.6)',
+                          }}>
+                            {card.imageUri ? (
+                              <img src={card.imageUri} alt={card.name}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                onMouseEnter={() => onHover(card as GameCard)}
+                                onMouseLeave={onHoverEnd}
+                              />
+                            ) : (
+                              <div style={{ width: '100%', height: '100%', background: '#1f2937',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <span style={{ fontSize: 7, color: '#6b7280', textAlign: 'center', padding: 2 }}>{card.name}</span>
+                              </div>
+                            )}
+                            {card.power != null && card.toughness != null && (card.typeLine ?? '').includes('Creature') && (
+                              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 18,
+                                background: 'rgba(0,0,0,0.88)', display: 'flex', alignItems: 'center',
+                                justifyContent: 'center', fontSize: 11, fontWeight: 800, color: '#f1f5f9' }}>
+                                {card.power}/{card.toughness}
+                              </div>
+                            )}
+                          </div>
+                          <span style={{ fontSize: 8, fontWeight: 900, letterSpacing: 1, color: '#f87171',
+                            textTransform: 'uppercase', textShadow: '0 0 6px rgba(239,68,68,0.8)' }}>
+                            BLOCKING
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -1575,36 +1601,49 @@ function TableCanvas({
                 </span>
               </div>
               {row.slots.map(slot => {
-                const card = myCardMap.get(slot.id);
+                const card = myCardMap.get(slot.topId);
                 if (!card) return null;
-                const showBadge = slot.groupSize > 1 && slot.groupIndex === slot.groupSize - 1;
+                const depth = slot.groupIds.length - 1;
+                const shadow = stackShadow(depth);
+                const isPopoverOpen = stackPopover?.groupIds[0] === slot.topId && stackPopover?.isMyCard;
                 return (
-                  <div key={slot.id} style={{ position: 'absolute', left: slot.x, top: rowBaseY + row.y, zIndex: 2 + slot.groupIndex }}
+                  <div key={slot.topId} style={{ position: 'absolute', left: slot.x, top: rowBaseY + row.y, zIndex: 2 }}
                     onMouseDown={e => e.stopPropagation()}>
-                    {showBadge && (
-                      <div style={{ position: 'absolute', top: -7, left: -7, zIndex: 30,
-                        background: '#2563eb', color: '#fff', borderRadius: 5,
-                        padding: '1px 5px', fontSize: 10, fontWeight: 900,
-                        border: '2px solid #1e293b', pointerEvents: 'none' }}>
-                        ×{slot.groupSize}
+                    <div style={{ boxShadow: shadow, borderRadius: 6 }}>
+                      <MyBattlefieldCard
+                        card={card} cardW={row.cW} cardH={row.cH}
+                        onTap={() => onTapCard(card.instanceId)}
+                        onGraveyard={() => onGraveyardCard(card.instanceId)}
+                        onExile={() => onExileCard(card.instanceId)}
+                        onReturnCommander={() => onReturnCmdCard(card.instanceId)}
+                        onReturnHand={() => onReturnHandCard(card.instanceId)}
+                        onGiveControl={(targetSocketId) => onGiveControl(card.instanceId, targetSocketId)}
+                        opponents={opponents.map((o) => ({ socketId: o.socketId, playerName: o.playerName }))}
+                        onDragStart={e => onDragStartCard(e, card.instanceId)}
+                        onHover={(c) => { onBfCardHover(c.instanceId); onHover(c); }}
+                        onHoverEnd={() => { onBfCardHover(null); onHoverEnd(); }}
+                        onUpdateCounter={(counter, delta) => onUpdateCounter(card.instanceId, counter, delta)}
+                        onSetPt={(power, toughness) => onSetPt(card.instanceId, power, toughness)}
+                        onSetKeywords={(kws) => onSetKeywords(card.instanceId, kws)}
+                      />
+                    </div>
+                    {/* Stack badge — click to expand popover */}
+                    {depth > 0 && (
+                      <div onClick={(e) => {
+                        e.stopPropagation();
+                        setStackPopover(isPopoverOpen ? null : {
+                          groupIds: slot.groupIds, isMyCard: true,
+                          canvasX: slot.x, canvasY: rowBaseY + row.y, cW: row.cW, cH: row.cH,
+                        });
+                      }}
+                        style={{ position: 'absolute', top: -7, left: -7, zIndex: 30,
+                          background: '#2563eb', color: '#fff', borderRadius: 5,
+                          padding: '1px 5px', fontSize: 10, fontWeight: 900,
+                          border: `2px solid ${isPopoverOpen ? '#60a5fa' : '#1e293b'}`,
+                          cursor: 'pointer' }}>
+                        ×{slot.groupIds.length}
                       </div>
                     )}
-                    <MyBattlefieldCard
-                      card={card} cardW={row.cW} cardH={row.cH}
-                      onTap={() => onTapCard(card.instanceId)}
-                      onGraveyard={() => onGraveyardCard(card.instanceId)}
-                      onExile={() => onExileCard(card.instanceId)}
-                      onReturnCommander={() => onReturnCmdCard(card.instanceId)}
-                      onReturnHand={() => onReturnHandCard(card.instanceId)}
-                      onGiveControl={(targetSocketId) => onGiveControl(card.instanceId, targetSocketId)}
-                      opponents={opponents.map((o) => ({ socketId: o.socketId, playerName: o.playerName }))}
-                      onDragStart={e => onDragStartCard(e, card.instanceId)}
-                      onHover={(c) => { onBfCardHover(c.instanceId); onHover(c); }}
-                      onHoverEnd={() => { onBfCardHover(null); onHoverEnd(); }}
-                      onUpdateCounter={(counter, delta) => onUpdateCounter(card.instanceId, counter, delta)}
-                      onSetPt={(power, toughness) => onSetPt(card.instanceId, power, toughness)}
-                      onSetKeywords={(kws) => onSetKeywords(card.instanceId, kws)}
-                    />
                   </div>
                 );
               })}
@@ -1707,6 +1746,75 @@ function TableCanvas({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* ── Stack popover ── */}
+          {stackPopover && (
+            <div
+              style={{
+                position: 'absolute',
+                left: stackPopover.canvasX - 8,
+                top: stackPopover.isMyCard
+                  ? stackPopover.canvasY - stackPopover.cH - 20
+                  : stackPopover.canvasY + stackPopover.cH + 20,
+                zIndex: 300,
+                display: 'flex', flexDirection: 'row', gap: 6,
+                background: 'rgba(6,9,18,0.96)',
+                border: '1px solid rgba(100,116,139,0.45)',
+                borderRadius: 12, padding: 10,
+                boxShadow: '0 12px 48px rgba(0,0,0,0.9)',
+              }}
+              onMouseDown={e => e.stopPropagation()}
+            >
+              <button onClick={() => setStackPopover(null)}
+                style={{ position: 'absolute', top: -8, right: -8, zIndex: 10,
+                  background: '#1e293b', border: '1px solid #334155', color: '#94a3b8',
+                  borderRadius: '50%', width: 20, height: 20, fontSize: 11, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+              {stackPopover.isMyCard
+                ? stackPopover.groupIds.map(id => {
+                    const c = myCardMap.get(id);
+                    if (!c) return null;
+                    return (
+                      <div key={id} onMouseDown={e => e.stopPropagation()}>
+                        <MyBattlefieldCard
+                          card={c} cardW={stackPopover.cW} cardH={stackPopover.cH}
+                          onTap={() => { onTapCard(c.instanceId); }}
+                          onGraveyard={() => { onGraveyardCard(c.instanceId); setStackPopover(null); }}
+                          onExile={() => { onExileCard(c.instanceId); setStackPopover(null); }}
+                          onReturnCommander={() => { onReturnCmdCard(c.instanceId); setStackPopover(null); }}
+                          onReturnHand={() => { onReturnHandCard(c.instanceId); setStackPopover(null); }}
+                          onGiveControl={(tgt) => { onGiveControl(c.instanceId, tgt); setStackPopover(null); }}
+                          opponents={opponents.map(o => ({ socketId: o.socketId, playerName: o.playerName }))}
+                          onDragStart={e => { onDragStartCard(e, c.instanceId); setStackPopover(null); }}
+                          onHover={(hc) => { onBfCardHover(hc.instanceId); onHover(hc); }}
+                          onHoverEnd={() => { onBfCardHover(null); onHoverEnd(); }}
+                          onUpdateCounter={(counter, delta) => onUpdateCounter(c.instanceId, counter, delta)}
+                          onSetPt={(pw, tg) => onSetPt(c.instanceId, pw, tg)}
+                          onSetKeywords={kws => onSetKeywords(c.instanceId, kws)}
+                        />
+                      </div>
+                    );
+                  })
+                : stackPopover.groupIds.map(id => {
+                    const c = opponents.flatMap(p => p.battlefield as GameCard[]).find(bc => bc.instanceId === id);
+                    if (!c) return null;
+                    return (
+                      <div key={id} style={{ width: stackPopover.cW, height: stackPopover.cH, flexShrink: 0,
+                        borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.12)' }}
+                        onMouseEnter={() => onHover(c)} onMouseLeave={onHoverEnd}>
+                        {c.imageUri
+                          ? <img src={c.imageUri} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={c.name} />
+                          : <div style={{ width: '100%', height: '100%', background: '#1f2937', display: 'flex',
+                              alignItems: 'center', justifyContent: 'center' }}>
+                              <span style={{ fontSize: 7, color: '#6b7280' }}>{c.name}</span>
+                            </div>
+                        }
+                      </div>
+                    );
+                  })
+              }
             </div>
           )}
 
@@ -2136,16 +2244,20 @@ export default function GameBoardPage() {
       if (announcementTimer.current) clearTimeout(announcementTimer.current);
       announcementTimer.current = setTimeout(() => setAnnouncement(null), 6000);
     });
-    socket.on('blockersConfirmed', ({ defendingSocketId, defendingPlayerName, blockers }) => {
+    socket.on('blockersConfirmed', ({ defendingUserId, defendingPlayerName, blockers }) => {
+      console.log(`[blockersConfirmed] received — ${defendingPlayerName} blocking with`, blockers.map(b => b.name));
       setConfirmedBlockers(prev => {
-        const filtered = prev.filter(e => e.defendingSocketId !== defendingSocketId);
-        return [...filtered, { defendingSocketId, defendingPlayerName, blockers }];
+        const filtered = prev.filter(e => e.defendingUserId !== defendingUserId);
+        return [...filtered, { defendingUserId, defendingPlayerName, blockers }];
       });
       setTimingToast(`🛡 ${defendingPlayerName} is blocking with ${blockers.length} creature${blockers.length !== 1 ? 's' : ''}`);
       if (toastTimer.current) clearTimeout(toastTimer.current);
       toastTimer.current = setTimeout(() => setTimingToast(null), 4000);
     });
-    socket.on('combatEnded', () => setConfirmedBlockers([]));
+    socket.on('combatEnded', () => {
+      console.log('[combatEnded] received — clearing blockers');
+      setConfirmedBlockers([]);
+    });
     socket.on('cardCounterUpdate', ({ playerId, instanceId, counters }) => {
       setGameState((prev) => {
         if (!prev) return prev;
@@ -2417,7 +2529,7 @@ export default function GameBoardPage() {
             style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#d1d5db' }}>
             Draw
           </button>
-          {isMyTurn && (
+          {isMyTurn ? (
             <>
               <button onClick={emit.endPhase} className="text-xs font-semibold px-3 py-1.5 rounded-lg transition"
                 style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#d1d5db' }}>
@@ -2428,6 +2540,11 @@ export default function GameBoardPage() {
                 End Turn ⏭
               </button>
             </>
+          ) : (
+            <span className="text-xs px-3 py-1.5 rounded-lg"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#6b7280', fontStyle: 'italic' }}>
+              ⏳ {active?.playerName ?? '…'}
+            </span>
           )}
           <div style={{ position: 'relative' }}>
             <button onClick={() => setShowDicePanel((v) => !v)}

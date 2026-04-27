@@ -1096,11 +1096,9 @@ io.on('connection', (socket) => {
         typeLine: c.typeLine,
       }));
     appendLog(game, `${player.playerName} declared ${blockers.length} blocker${blockers.length !== 1 ? 's' : ''}`);
-    io.to(game.roomId).emit('blockersConfirmed', {
-      defendingSocketId: player.socketId,
-      defendingPlayerName: player.playerName,
-      blockers,
-    });
+    const payload = { defendingUserId: player.userId, defendingPlayerName: player.playerName, blockers };
+    console.log(`[blockersConfirmed] emit → room ${game.roomId}`, payload.defendingPlayerName, payload.blockers.map(b => b.name));
+    io.to(game.roomId).emit('blockersConfirmed', payload);
   });
 
   // ─── Disconnect ───────────────────────────────────────────────────────────────

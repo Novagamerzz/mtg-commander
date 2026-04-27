@@ -131,7 +131,7 @@ export interface ServerToClientEvents {
   'player:joined': (player: Player) => void;
   'player:left': (playerId: string) => void;
   'chat:message': (payload: ChatMessage) => void;
-  'blockersConfirmed': (data: { defendingSocketId: string; defendingPlayerName: string; blockers: { instanceId: string; name: string; imageUri: string; power?: string; toughness?: string; counters?: Record<string, number>; typeLine?: string }[] }) => void;
+  'blockersConfirmed': (data: { defendingUserId: string; defendingPlayerName: string; blockers: { instanceId: string; name: string; imageUri: string; power?: string; toughness?: string; counters?: Record<string, number>; typeLine?: string }[] }) => void;
   'combatEnded': () => void;
 }
 
