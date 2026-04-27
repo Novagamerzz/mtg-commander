@@ -2561,9 +2561,10 @@ export default function GameBoardPage() {
           position: 'relative', zIndex: 50 }}>
         <div className="shrink-0 flex items-center gap-2">
           <span className="text-xs font-mono" style={{ color: '#4b5563' }}>T{gameState.turn}</span>
-          <span className="text-sm font-bold" style={{ color: isMyTurn ? '#facc15' : '#e5e7eb' }}>
-            {isMyTurn ? '⚡ Your Turn' : `${active?.playerName}'s Turn`}
-          </span>
+          {isMyTurn
+            ? <span className="text-sm font-bold" style={{ color: '#facc15' }}>⚡ Your Turn</span>
+            : <span className="text-sm font-bold" style={{ color: '#e5e7eb' }}>⏳ {active?.playerName}'s Turn</span>
+          }
           {(!isMyTurn || (gameState.phase !== 'main1' && gameState.phase !== 'main2')) && (
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md"
               style={{ background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.35)', color: '#a5b4fc' }}>
@@ -2592,7 +2593,7 @@ export default function GameBoardPage() {
           ) : (
             <span className="text-xs px-3 py-1.5 rounded-lg"
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#6b7280', fontStyle: 'italic' }}>
-              ⏳ {active?.playerName ?? '…'}
+              ⏳ {active?.playerName ?? '…'}'s Turn
             </span>
           )}
           <div style={{ position: 'relative' }}>
