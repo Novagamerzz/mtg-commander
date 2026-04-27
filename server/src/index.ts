@@ -757,8 +757,11 @@ io.on('connection', (socket) => {
     const [castCard] = player.commandZone.splice(0, 1);
     player.battlefield.push(castCard);
     const commander_ref = castCard; // alias for log below
-    const tax = player.commanderCastCount * 2;
+    const prev = player.commanderCastCount;
+    const tax = prev * 2;
     player.commanderCastCount++;
+    const newTax = player.commanderCastCount * 2;
+    console.log(`[tax] ${castCard.name} cast count: ${prev} → ${player.commanderCastCount}, tax: +${newTax}`);
     const taxNote = tax > 0 ? ` (paid +${tax} commander tax)` : '';
     appendLog(game, `${player.playerName} cast ${commander_ref.name}${taxNote}`);
     broadcastGame(game);
