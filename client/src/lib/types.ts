@@ -35,6 +35,7 @@ export interface GameCard {
   powerOverride?: string | null;
   toughnessOverride?: string | null;
   isCommander?: boolean;
+  isToken?: boolean;
   keywords?: string[];
 }
 

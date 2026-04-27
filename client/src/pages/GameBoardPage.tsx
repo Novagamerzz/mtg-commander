@@ -653,6 +653,7 @@ function CounterBadge({ type, count }: { type: string; count: number }) {
 // ── P/T bar ───────────────────────────────────────────────────────────────────
 
 function PtBar({ card }: { card: GameCard }) {
+  if (card.isToken) return null;
   const isCreature = (card.typeLine ?? '').includes('Creature');
   if (!isCreature) return null;
   const basePow = card.powerOverride ?? card.power ?? null;
@@ -679,6 +680,32 @@ function PtBar({ card }: { card: GameCard }) {
       <span style={{ opacity: 0.35, fontSize: 12 }}>/</span>
       <span style={{ fontSize: 11, lineHeight: 1 }}>🛡</span>
       <span>{fmt(baseTou)}</span>
+    </div>
+  );
+}
+
+function TokenPtOverlay({ card }: { card: GameCard }) {
+  if (!card.isToken) return null;
+  if (!(card.typeLine ?? '').includes('Creature')) return null;
+  const basePow = card.powerOverride ?? card.power ?? null;
+  const baseTou = card.toughnessOverride ?? card.toughness ?? null;
+  if (basePow === null && baseTou === null) return null;
+  const pp = card.counters?.['+1/+1'] ?? 0;
+  const mm = card.counters?.['-1/-1'] ?? 0;
+  const delta = pp - mm;
+  const fmt = (base: string | null) => {
+    if (base === null) return '?';
+    const n = parseInt(base, 10);
+    return isNaN(n) ? base : String(Math.max(0, n + delta));
+  };
+  return (
+    <div style={{
+      position: 'absolute', bottom: 4, left: '50%', transform: 'translateX(-50%)',
+      zIndex: 20, pointerEvents: 'none',
+      background: 'rgba(0,0,0,0.82)', borderRadius: 8, padding: '2px 10px',
+      fontSize: 16, fontWeight: 900, color: '#fff', letterSpacing: 0.5, whiteSpace: 'nowrap',
+    }}>
+      {fmt(basePow)}/{fmt(baseTou)}
     </div>
   );
 }
@@ -763,14 +790,15 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
               ))}
             </div>
           )}
-          {hasCounters && Object.entries(counters).filter(([, n]) => n > 0).map(([type, n]) => (
+          {!card.isToken && hasCounters && Object.entries(counters).filter(([, n]) => n > 0).map(([type, n]) => (
             <CounterBadge key={type} type={type} count={n} />
           ))}
         </div>
       )}
 
-      {/* P/T bar */}
+      {/* P/T bar for real cards; live P/T overlay for tokens */}
       <PtBar card={card} />
+      <TokenPtOverlay card={card} />
 
       {/* ⋮ button */}
       <button
@@ -1965,12 +1993,13 @@ function TableCanvas({
                                     ))}
                                   </div>
                                 )}
-                                {oppHasCounters && Object.entries(oppCounters).filter(([, n]) => n > 0).map(([type, n]) => (
+                                {!card.isToken && oppHasCounters && Object.entries(oppCounters).filter(([, n]) => n > 0).map(([type, n]) => (
                                   <CounterBadge key={type} type={type} count={n} />
                                 ))}
                               </div>
                             )}
                             <PtBar card={card} />
+                            <TokenPtOverlay card={card} />
                             {/* Attacker indicator from combatState */}
                             {combatState?.attacks.some(a => a.attackerId === slot.topId) && (
                               <div style={{ position: 'absolute', top: 2, left: 2, zIndex: 60,

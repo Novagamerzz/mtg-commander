@@ -36,6 +36,7 @@ interface InternalCard {
   powerOverride?: string | null;
   toughnessOverride?: string | null;
   isCommander?: boolean;
+  isToken?: boolean;
   keywords?: string[];
 }
 
@@ -887,6 +888,7 @@ io.on('connection', (socket) => {
       tapped: false,
       power: power || undefined,
       toughness: toughness || undefined,
+      isToken: true,
     };
     player.battlefield.push(token);
     const ptStr = power && toughness ? ` (${power}/${toughness})` : '';
