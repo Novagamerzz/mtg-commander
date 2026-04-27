@@ -1217,13 +1217,28 @@ function calcCombatResults(attacks: CombatAttackEntry[], blocks: CombatBlockEntr
 
 interface CombatResultsModalProps {
   combatState: PersonalCombatState;
-  onConfirm: (payload: { deadInstanceIds: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] }) => void;
+  onConfirm: (payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] }) => void;
   onCancel: () => void;
 }
+
+// 'command_zone' | 'graveyard' — choice per dying creature id
+type CmdChoice = 'command_zone' | 'graveyard';
 
 function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsModalProps) {
   const results = React.useMemo(() => calcCombatResults(combatState.attacks, combatState.blocks), [combatState]);
   const [indestructible, setIndestructible] = React.useState<Set<string>>(new Set());
+  // default: commanders go back to command zone
+  const [cmdChoices, setCmdChoices] = React.useState<Record<string, CmdChoice>>(() => {
+    const init: Record<string, CmdChoice> = {};
+    for (const r of calcCombatResults(combatState.attacks, combatState.blocks)) {
+      if (r.attackerDies && r.attacker.attackerIsCommander) init[r.attacker.attackerId] = 'command_zone';
+      for (const bid of r.dyingBlockers) {
+        const blk = combatState.blocks.find(b => b.blockerId === bid);
+        if (blk?.blockerIsCommander) init[bid] = 'command_zone';
+      }
+    }
+    return init;
+  });
   const [trampleOn, setTrampleOn] = React.useState<Set<string>>(new Set());
   const [trampleDmg, setTrampleDmg] = React.useState<Record<string, number>>({});
 
@@ -1232,13 +1247,31 @@ function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsM
   }
 
   function handleConfirm() {
-    const deadInstanceIds: string[] = [];
+    const deadToGY: string[] = [];
+    const deadToCommandZone: string[] = [];
     const lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] = [];
 
     for (const r of results) {
-      if (r.attackerDies && !indestructible.has(r.attacker.attackerId)) deadInstanceIds.push(r.attacker.attackerId);
-      for (const bid of r.dyingBlockers) { if (!indestructible.has(bid)) deadInstanceIds.push(bid); }
-
+      // Attacker death
+      if (r.attackerDies && !indestructible.has(r.attacker.attackerId)) {
+        if (r.attacker.attackerIsCommander && cmdChoices[r.attacker.attackerId] === 'command_zone') {
+          deadToCommandZone.push(r.attacker.attackerId);
+        } else {
+          deadToGY.push(r.attacker.attackerId);
+        }
+      }
+      // Blocker deaths
+      for (const bid of r.dyingBlockers) {
+        if (!indestructible.has(bid)) {
+          const blk = combatState.blocks.find(b => b.blockerId === bid);
+          if (blk?.blockerIsCommander && cmdChoices[bid] === 'command_zone') {
+            deadToCommandZone.push(bid);
+          } else {
+            deadToGY.push(bid);
+          }
+        }
+      }
+      // Life loss
       if (r.isUnblocked && r.damageToPlayer > 0) {
         lifeLost.push({ targetUserId: r.attacker.targetUserId, amount: r.damageToPlayer, fromInstanceId: r.attacker.attackerId, isCommanderDmg: r.attacker.attackerIsCommander });
       }
@@ -1248,13 +1281,34 @@ function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsM
       }
     }
 
-    onConfirm({ deadInstanceIds, lifeLost });
+    onConfirm({ deadToGY, deadToCommandZone, lifeLost });
   }
 
   const overlay: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-  const box: React.CSSProperties = { background: '#0a0f1a', border: '1px solid rgba(251,146,60,0.5)', borderRadius: 16, padding: '20px 24px', maxWidth: 560, width: '90vw', maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 24px 64px rgba(0,0,0,0.95)' };
+  const box: React.CSSProperties = { background: '#0a0f1a', border: '1px solid rgba(251,146,60,0.5)', borderRadius: 16, padding: '20px 24px', maxWidth: 580, width: '90vw', maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 24px 64px rgba(0,0,0,0.95)' };
   const row: React.CSSProperties = { display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' };
   const pill = (bg: string, color: string): React.CSSProperties => ({ background: bg, color, borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 800, whiteSpace: 'nowrap' });
+
+  function CommanderDeathChoice({ id, name, isCommander }: { id: string; name: string; isCommander: boolean }) {
+    if (!isCommander) return null;
+    const choice = cmdChoices[id] ?? 'command_zone';
+    const btnBase: React.CSSProperties = { fontSize: 9, padding: '2px 7px', borderRadius: 5, cursor: 'pointer', fontWeight: 700, border: '1px solid' };
+    return (
+      <div style={{ marginTop: 4, background: 'rgba(250,204,21,0.08)', border: '1px solid rgba(250,204,21,0.3)', borderRadius: 6, padding: '4px 8px' }}>
+        <p style={{ fontSize: 9, color: '#fbbf24', fontWeight: 700, marginBottom: 4 }}>👑 {name} is a commander — where should it go?</p>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button style={{ ...btnBase, borderColor: choice === 'command_zone' ? '#fbbf24' : 'rgba(255,255,255,0.2)', background: choice === 'command_zone' ? 'rgba(250,204,21,0.2)' : 'transparent', color: choice === 'command_zone' ? '#fbbf24' : '#6b7280' }}
+            onClick={() => setCmdChoices(p => ({ ...p, [id]: 'command_zone' }))}>
+            👑 Command Zone (tax +2)
+          </button>
+          <button style={{ ...btnBase, borderColor: choice === 'graveyard' ? '#f87171' : 'rgba(255,255,255,0.2)', background: choice === 'graveyard' ? 'rgba(239,68,68,0.15)' : 'transparent', color: choice === 'graveyard' ? '#f87171' : '#6b7280' }}
+            onClick={() => setCmdChoices(p => ({ ...p, [id]: 'graveyard' }))}>
+            🪦 Graveyard
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={overlay} onMouseDown={e => e.stopPropagation()}>
@@ -1265,21 +1319,24 @@ function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsM
           const atkPT = effectivePT(r.attacker.attackerPower, r.attacker.attackerToughness, r.attacker.attackerCounters);
           return (
             <div key={r.attacker.attackerId} style={row}>
-              {/* Attacker */}
-              <div style={{ minWidth: 120 }}>
+              {/* Attacker column */}
+              <div style={{ minWidth: 130 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: '#f87171' }}>⚔️ {r.attacker.attackerName}</span>
                   {r.attacker.attackerPower != null && <span style={pill('rgba(239,68,68,0.2)', '#f87171')}>{atkPT.power}/{atkPT.toughness}</span>}
                   {r.attacker.attackerIsCommander && <span style={pill('rgba(250,204,21,0.2)', '#fbbf24')}>CMD</span>}
                 </div>
+                {r.attackerDies && !indestructible.has(r.attacker.attackerId) && (
+                  <CommanderDeathChoice id={r.attacker.attackerId} name={r.attacker.attackerName} isCommander={r.attacker.attackerIsCommander} />
+                )}
                 {r.attackerDies && (
-                  <label style={{ fontSize: 10, color: '#f87171', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <label style={{ fontSize: 10, color: '#f87171', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', marginTop: 4 }}>
                     <input type="checkbox" checked={indestructible.has(r.attacker.attackerId)} onChange={() => toggleIndestructible(r.attacker.attackerId)} />
                     Indestructible (spare)
                   </label>
                 )}
               </div>
-              {/* Result */}
+              {/* Result column */}
               <div style={{ flex: 1 }}>
                 {r.isUnblocked ? (
                   <div>
@@ -1293,15 +1350,21 @@ function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsM
                       const bPT = effectivePT(b.blockerPower, b.blockerToughness, b.blockerCounters);
                       const dies = r.dyingBlockers.includes(b.blockerId);
                       return (
-                        <div key={b.blockerId} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                          <span style={{ fontSize: 10, color: dies ? '#f87171' : '#86efac' }}>🛡 {b.blockerName}</span>
-                          {b.blockerPower != null && <span style={pill('rgba(74,222,128,0.15)', '#86efac')}>{bPT.power}/{bPT.toughness}</span>}
-                          {dies ? (
-                            <label style={{ fontSize: 9, color: '#f87171', display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
-                              <input type="checkbox" checked={indestructible.has(b.blockerId)} onChange={() => toggleIndestructible(b.blockerId)} />
-                              Indestructible
-                            </label>
-                          ) : <span style={{ fontSize: 9, color: '#4ade80' }}>survives</span>}
+                        <div key={b.blockerId} style={{ marginBottom: 4 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ fontSize: 10, color: dies ? '#f87171' : '#86efac' }}>🛡 {b.blockerName}</span>
+                            {b.blockerPower != null && <span style={pill('rgba(74,222,128,0.15)', '#86efac')}>{bPT.power}/{bPT.toughness}</span>}
+                            {b.blockerIsCommander && <span style={pill('rgba(250,204,21,0.2)', '#fbbf24')}>CMD</span>}
+                            {dies
+                              ? <label style={{ fontSize: 9, color: '#f87171', display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+                                  <input type="checkbox" checked={indestructible.has(b.blockerId)} onChange={() => toggleIndestructible(b.blockerId)} />
+                                  Indestructible
+                                </label>
+                              : <span style={{ fontSize: 9, color: '#4ade80' }}>survives</span>}
+                          </div>
+                          {dies && !indestructible.has(b.blockerId) && (
+                            <CommanderDeathChoice id={b.blockerId} name={b.blockerName} isCommander={b.blockerIsCommander} />
+                          )}
                         </div>
                       );
                     })}
@@ -2635,14 +2698,19 @@ export default function GameBoardPage() {
     });
     socket.on('combatResolved', ({ dead, lifeLost }) => {
       const lines = [
-        ...dead.map(d => `💀 ${d.name} (${d.playerName}) → graveyard`),
-        ...lifeLost.map(l => `💔 ${l.targetPlayerName} takes ${l.amount} damage`),
+        ...dead.map(d => `💀 ${d.name} (${d.playerName})`),
+        ...lifeLost.map(l => `💔 ${l.targetPlayerName} −${l.amount}`),
       ];
       if (lines.length) {
-        setTimingToast(lines.slice(0, 3).join(' | '));
+        setTimingToast(lines.slice(0, 4).join(' | '));
         if (toastTimer.current) clearTimeout(toastTimer.current);
         toastTimer.current = setTimeout(() => setTimingToast(null), 5000);
       }
+    });
+    socket.on('commanderReturned', ({ commanderName, newTax }) => {
+      setTimingToast(`👑 ${commanderName} returned to command zone (tax now +${newTax})`);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setTimingToast(null), 4000);
     });
     socket.on('cardCounterUpdate', ({ playerId, instanceId, counters }) => {
       setGameState((prev) => {
@@ -2674,6 +2742,7 @@ export default function GameBoardPage() {
       socket.off('blockersDeclared');
       socket.off('combatEnded');
       socket.off('combatResolved');
+      socket.off('commanderReturned');
       socket.off('cardCounterUpdate');
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (announcementTimer.current) clearTimeout(announcementTimer.current);
@@ -2876,7 +2945,7 @@ export default function GameBoardPage() {
     setBlockerAssignments(prev => { const m = new Map(prev); m.delete(blockerId); return m; });
   }
 
-  function handleResolveCombat(payload: { deadInstanceIds: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] }) {
+  function handleResolveCombat(payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] }) {
     socket.emit('game:resolve_combat', payload);
     setShowCombatResults(false);
   }

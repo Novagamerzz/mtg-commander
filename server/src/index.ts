@@ -1168,7 +1168,7 @@ io.on('connection', (socket) => {
     broadcastGame(game);
   });
 
-  socket.on('game:resolve_combat', ({ deadInstanceIds, lifeLost }) => {
+  socket.on('game:resolve_combat', ({ deadToGY, deadToCommandZone, lifeLost }) => {
     const game = getGame(socket.id);
     if (!game || game.phase !== 'damage') return;
     const activePlayer = game.players[game.activePlayerIndex];
@@ -1177,8 +1177,8 @@ io.on('connection', (socket) => {
     const dead: { instanceId: string; name: string; playerName: string }[] = [];
     const lifeLostResults: { targetPlayerName: string; amount: number }[] = [];
 
-    // Move dead creatures to graveyard
-    for (const instanceId of deadInstanceIds) {
+    // Move regular dead creatures to graveyard
+    for (const instanceId of (deadToGY ?? [])) {
       for (const p of game.players) {
         const idx = p.battlefield.findIndex(c => c.instanceId === instanceId);
         if (idx !== -1) {
@@ -1187,6 +1187,24 @@ io.on('connection', (socket) => {
           p.graveyard.push(card);
           dead.push({ instanceId, name: card.name, playerName: p.playerName });
           appendLog(game, `${card.name} → ${p.playerName}'s graveyard (combat damage)`);
+          break;
+        }
+      }
+    }
+
+    // Return commanders to command zone with tax increment
+    for (const instanceId of (deadToCommandZone ?? [])) {
+      for (const p of game.players) {
+        const idx = p.battlefield.findIndex(c => c.instanceId === instanceId);
+        if (idx !== -1) {
+          const [card] = p.battlefield.splice(idx, 1);
+          card.tapped = false;
+          p.commandZone.push(card);
+          p.commanderCastCount++;
+          const newTax = p.commanderCastCount * 2;
+          dead.push({ instanceId, name: card.name, playerName: p.playerName });
+          appendLog(game, `${card.name} returned to command zone (tax now +${newTax})`);
+          io.to(game.roomId).emit('commanderReturned', { playerId: p.socketId, commanderName: card.name, newTax });
           break;
         }
       }
@@ -1202,15 +1220,15 @@ io.on('connection', (socket) => {
       lifeLostResults.push({ targetPlayerName: target.playerName, amount: ll.amount });
 
       if (ll.isCommanderDmg) {
-        // Find the attacker's socketId for the commander damage key
         const attackingP = game.players.find(p =>
           p.battlefield.some(c => c.instanceId === ll.fromInstanceId) ||
-          p.graveyard.some(c => c.instanceId === ll.fromInstanceId)
+          p.graveyard.some(c => c.instanceId === ll.fromInstanceId) ||
+          p.commandZone.some(c => c.instanceId === ll.fromInstanceId)
         );
         if (attackingP) {
           const prev = target.commanderDamage[attackingP.socketId] ?? 0;
           target.commanderDamage[attackingP.socketId] = prev + ll.amount;
-          const cmdCard = [...attackingP.battlefield, ...attackingP.graveyard].find(c => c.instanceId === ll.fromInstanceId);
+          const cmdCard = [...attackingP.battlefield, ...attackingP.graveyard, ...attackingP.commandZone].find(c => c.instanceId === ll.fromInstanceId);
           appendLog(game, `Commander damage: ${cmdCard?.name ?? '?'} → ${target.playerName} total ${target.commanderDamage[attackingP.socketId]}`);
           if (target.commanderDamage[attackingP.socketId] >= 21 && !target.eliminated && !game.pendingElimination) {
             game.pendingElimination = { socketId: target.socketId, playerName: target.playerName, reason: `21+ commander damage from ${cmdCard?.name ?? '?'}` };

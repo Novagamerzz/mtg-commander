@@ -152,6 +152,7 @@ export interface ServerToClientEvents {
   'blockersDeclared': (data: { defendingPlayerName: string; count: number }) => void;
   'combatEnded': () => void;
   'combatResolved': (data: { dead: { instanceId: string; name: string; playerName: string }[]; lifeLost: { targetPlayerName: string; amount: number }[] }) => void;
+  'commanderReturned': (data: { playerId: string; commanderName: string; newTax: number }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -202,5 +203,5 @@ export interface ClientToServerEvents {
   'chat:send': (message: string) => void;
   'game:declare_attackers': (payload: { attacks: { attackerId: string; targetUserId: string }[] }) => void;
   'game:declare_blockers': (payload: { blocks: { blockerId: string; blockingAttackerId: string }[] }) => void;
-  'game:resolve_combat': (payload: { deadInstanceIds: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] }) => void;
+  'game:resolve_combat': (payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] }) => void;
 }
