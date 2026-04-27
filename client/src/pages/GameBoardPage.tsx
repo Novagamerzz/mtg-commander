@@ -1171,9 +1171,12 @@ function ZoneHeader({ player, color, isMonarch }: { player: PersonalPlayerState;
 
 function effectivePT(basePow: string | null, baseTou: string | null, counters: Record<string, number> = {}) {
   const delta = (counters['+1/+1'] ?? 0) - (counters['-1/-1'] ?? 0);
+  // Use explicit parseInt without || fallback to correctly handle 0-power / 0-toughness cards
+  const rawP = basePow !== null ? parseInt(basePow, 10) : 0;
+  const rawT = baseTou !== null ? parseInt(baseTou, 10) : 1;
   return {
-    power:     Math.max(0, (parseInt(basePow ?? '0', 10) || 0) + delta),
-    toughness: Math.max(0, (parseInt(baseTou ?? '1', 10) || 1) + delta),
+    power:     Math.max(0, (isNaN(rawP) ? 0 : rawP) + delta),
+    toughness: Math.max(0, (isNaN(rawT) ? 1 : rawT) + delta),
   };
 }
 
@@ -1193,20 +1196,27 @@ function calcCombatResults(attacks: CombatAttackEntry[], blocks: CombatBlockEntr
     const atkPT = effectivePT(atk.attackerPower, atk.attackerToughness, atk.attackerCounters);
 
     if (myBlocks.length === 0) {
+      console.log(`[combat] ${atk.attackerName}(${atkPT.power}/${atkPT.toughness}): UNBLOCKED → deals ${atkPT.power} to ${atk.targetPlayerName}`);
       return { attacker: atk, blockers: [], attackerDies: false, dyingBlockers: [], isUnblocked: true, excessDamage: 0, damageToPlayer: atkPT.power };
     }
 
-    const totalBlockerPower = myBlocks.reduce((s, b) => s + effectivePT(b.blockerPower, b.blockerToughness, b.blockerCounters).power, 0);
-    const attackerDies = totalBlockerPower >= atkPT.toughness;
-
-    // Attacker assigns damage to blockers in order
+    // Each blocker receives the attacker's full power as damage
     const dyingBlockers: string[] = [];
-    let rem = atkPT.power;
+    let totalBlockerToughness = 0;
+    const totalBlockerPower = myBlocks.reduce((s, b) => s + effectivePT(b.blockerPower, b.blockerToughness, b.blockerCounters).power, 0);
+
     for (const b of myBlocks) {
       const bPT = effectivePT(b.blockerPower, b.blockerToughness, b.blockerCounters);
-      if (rem >= bPT.toughness) { dyingBlockers.push(b.blockerId); rem -= bPT.toughness; }
+      totalBlockerToughness += bPT.toughness;
+      // Blocker dies if it takes damage >= its toughness; attacker deals its full power to each blocker
+      const dies = atkPT.power >= bPT.toughness;
+      console.log(`[combat] ${atk.attackerName}(${atkPT.power}/${atkPT.toughness}) vs ${b.blockerName}(${bPT.power}/${bPT.toughness}): blocker dies=${dies}`);
+      if (dies) dyingBlockers.push(b.blockerId);
     }
-    const totalBlockerToughness = myBlocks.reduce((s, b) => s + effectivePT(b.blockerPower, b.blockerToughness, b.blockerCounters).toughness, 0);
+
+    const attackerDies = totalBlockerPower >= atkPT.toughness;
+    console.log(`[combat] ${atk.attackerName}: total blocker power=${totalBlockerPower} vs toughness=${atkPT.toughness}: attacker dies=${attackerDies}`);
+
     const excessDamage = Math.max(0, atkPT.power - totalBlockerToughness);
 
     return { attacker: atk, blockers: myBlocks, attackerDies, dyingBlockers, isUnblocked: false, excessDamage, damageToPlayer: 0 };
@@ -1611,19 +1621,13 @@ function CombatPanel({
           </button>
         </div>
       );
-    } else if (isMyTurn) {
-      return (
-        <div style={panelStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-            <span style={{ fontSize: 13, color: '#fb923c', fontWeight: 700 }}>⏳ Waiting for defenders to declare blockers…</span>
-            <button style={ghostBtn} onClick={onEndPhase}>Skip to Damage →</button>
-          </div>
-        </div>
-      );
     } else {
+      // Active player or spectator — phase auto-advances when defender confirms blockers
       return (
         <div style={panelStyle}>
-          <span style={{ fontSize: 13, color: '#9ca3af' }}>⏳ Waiting for defenders to declare blockers…</span>
+          <span style={{ fontSize: 13, color: isMyTurn ? '#fb923c' : '#9ca3af', fontWeight: isMyTurn ? 700 : 400 }}>
+            ⏳ Waiting for defenders to declare blockers…
+          </span>
         </div>
       );
     }

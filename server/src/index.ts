@@ -1146,8 +1146,13 @@ io.on('connection', (socket) => {
       blocks: [],
     };
     appendLog(game, `${player.playerName} declared ${attacks.length} attacker${attacks.length !== 1 ? 's' : ''}`);
-    // Auto-advance to declare_blockers
-    game.phase = 'declare_blockers';
+    // Check if any targeted defender has untapped creatures to block with
+    const targetedUserIds = new Set(attacks.map(a => a.targetUserId));
+    const anyCanBlock = game.players
+      .filter(p => targetedUserIds.has(p.userId))
+      .some(p => p.battlefield.some(c => !c.tapped && (c.typeLine ?? '').includes('Creature')));
+    game.phase = anyCanBlock ? 'declare_blockers' : 'damage';
+    if (!anyCanBlock) appendLog(game, 'No untapped creatures to block — skipping to damage');
     io.to(game.roomId).emit('attackersDeclared', { attackingPlayerName: player.playerName, count: attacks.length });
     broadcastGame(game);
   });
@@ -1165,6 +1170,8 @@ io.on('connection', (socket) => {
     appendLog(game, `${player.playerName} declared ${blocks.length} blocker${blocks.length !== 1 ? 's' : ''}`);
     console.log(`[blockersDeclared] emit → room ${game.roomId}`, player.playerName, blocks.length);
     io.to(game.roomId).emit('blockersDeclared', { defendingPlayerName: player.playerName, count: blocks.length });
+    // Auto-advance to damage step
+    game.phase = 'damage';
     broadcastGame(game);
   });
 
