@@ -966,16 +966,21 @@ interface CRow {
   slots: CSlot[];
 }
 
-function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zoneW = CANVAS_W - 40, cardBase = C_W_BASE): CRow[] {
+function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zoneW = CANVAS_W - 40, cardBase = C_W_BASE, noStack = false): CRow[] {
   const gap = C_HGAP, rgap = C_RGAP;
   const out: CRow[] = [];
   let ry = 0;
   for (const { label, cards: rc, isLand } of groupByType(cards, rowDefs)) {
     const nameMap = new Map<string, GameCard[]>();
     for (const c of rc) {
-      const arr = nameMap.get(c.name) ?? [];
+      // noStack (during declare_attackers): every card is its own slot so each can be targeted
+      // otherwise: group by name + counters + keywords so modified copies don't merge into stacks
+      const key = noStack
+        ? c.instanceId
+        : `${c.name}__${JSON.stringify(c.counters ?? {})}__${(c.keywords ?? []).slice().sort().join(',')}`;
+      const arr = nameMap.get(key) ?? [];
       arr.push(c);
-      nameMap.set(c.name, arr);
+      nameMap.set(key, arr);
     }
     const { cW, cH } = cardSizeForZone(nameMap.size, isLand, zoneW, cardBase);
     const slots: CSlot[] = [];
@@ -1042,16 +1047,18 @@ function tableLayout(opCount: number): { my: ZoneRect; ops: ZoneRect[] } {
 
 // ── Mini pile (opponent graveyard / exile) ────────────────────────────────────
 
-function MiniPile({ cards, label, color, onHover, onHoverEnd }: {
+function MiniPile({ cards, label, color, onHover, onHoverEnd, onClick }: {
   cards: GameCard[]; label: string; color: string;
   onHover: (c: GameCard) => void; onHoverEnd: () => void;
+  onClick?: () => void;
 }) {
   const top = cards[cards.length - 1];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
       <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontWeight: 700, letterSpacing: 1 }}>{label}</span>
       <div style={{ position: 'relative', width: 48, height: 68, borderRadius: 6, overflow: 'hidden',
-        border: `1px dashed ${color}70`, background: 'rgba(0,0,0,0.35)' }}
+        border: `1px dashed ${color}70`, background: 'rgba(0,0,0,0.35)', cursor: onClick ? 'pointer' : 'default' }}
+        onClick={onClick}
         onMouseEnter={() => top && onHover(top)} onMouseLeave={onHoverEnd}>
         {top?.imageUri && <img src={top.imageUri} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.75 }} />}
         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0,
@@ -1745,6 +1752,7 @@ function TableCanvas({
   const [overGy, setOverGy]       = useState(false);
   const [overEx, setOverEx]       = useState(false);
   const [stackPopover, setStackPopover] = useState<{ groupIds: string[]; isMyCard: boolean; canvasX: number; canvasY: number; cW: number; cH: number } | null>(null);
+  const [oppGravModal, setOppGravModal] = useState<{ playerName: string; cards: GameCard[] } | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   // Stable ref so wheel / pan handlers always see current zoom+pan without stale closures
   const camRef = useRef({ zoom: 0.7, pan: { x: 0, y: 0 } });
@@ -1830,7 +1838,7 @@ function TableCanvas({
   const cardH = Math.round(cardSize * C_H_BASE / C_W_BASE);
 
   const rowBaseY = MY_LABEL_H;
-  const myRows    = buildCRows(me.battlefield, TYPE_ROWS, layout.my.w, cardSize);
+  const myRows    = buildCRows(me.battlefield, TYPE_ROWS, layout.my.w, cardSize, combatPhase === 'declare_attackers');
   const myCardMap = new Map<string, GameCard>(me.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
   return (
@@ -2002,7 +2010,8 @@ function TableCanvas({
               <div style={{ position: 'absolute', bottom: 10, right: 10, display: 'flex', gap: 8, zIndex: 3 }}>
                 {player.graveyard.length > 0 && (
                   <MiniPile cards={player.graveyard} label="GY" color="#9ca3af"
-                    onHover={onHover} onHoverEnd={onHoverEnd} />
+                    onHover={onHover} onHoverEnd={onHoverEnd}
+                    onClick={() => setOppGravModal({ playerName: player.playerName, cards: player.graveyard })} />
                 )}
                 {player.exile.length > 0 && (
                   <MiniPile cards={player.exile} label="EX" color="#a78bfa"
@@ -2312,6 +2321,16 @@ function TableCanvas({
           + 🃏
         </button>
       </div>
+
+      {/* Opponent graveyard viewer modal */}
+      {oppGravModal && (
+        <ZoneModal
+          title={`${oppGravModal.playerName}'s Graveyard`}
+          cards={oppGravModal.cards}
+          onClose={() => setOppGravModal(null)}
+          actions={[]}
+        />
+      )}
     </div>
   );
 }
