@@ -165,6 +165,8 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
         attackerId: a.attackerId, attackerName: card?.name ?? '?', attackerImage: card?.imageUri ?? '',
         attackingUserId: a.attackingUserId, attackingPlayerName: attP?.playerName ?? '?',
         targetUserId: a.targetUserId, targetPlayerName: tgtP?.playerName ?? '?',
+        attackerPower: card?.power ?? null, attackerToughness: card?.toughness ?? null,
+        attackerCounters: card?.counters ?? {}, attackerIsCommander: card?.isCommander ?? false,
       };
     }),
     blocks: game.combatState.blocks.map(b => {
@@ -174,6 +176,8 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
         blockerId: b.blockerId, blockerName: card?.name ?? '?', blockerImage: card?.imageUri ?? '',
         blockingAttackerId: b.blockingAttackerId,
         defendingUserId: b.defendingUserId, defendingPlayerName: defP?.playerName ?? '?',
+        blockerPower: card?.power ?? null, blockerToughness: card?.toughness ?? null,
+        blockerCounters: card?.counters ?? {}, blockerIsCommander: card?.isCommander ?? false,
       };
     }),
   } : null;
@@ -634,6 +638,20 @@ io.on('connection', (socket) => {
       io.to(game.roomId).emit('combatEnded');
     }
     advancePhase(game);
+    // Auto-skip all combat sub-steps if active player has no untapped creatures
+    if (game.phase === 'begin_combat') {
+      const active = game.players[game.activePlayerIndex];
+      const hasAttackers = active.battlefield.some(c => !c.tapped && (c.typeLine ?? '').includes('Creature'));
+      if (!hasAttackers) {
+        const COMBAT_PHASES: TurnPhase[] = ['begin_combat', 'declare_attackers', 'declare_blockers', 'damage', 'end_combat'];
+        while (COMBAT_PHASES.includes(game.phase)) {
+          const idx = PHASE_ORDER.indexOf(game.phase);
+          game.phase = PHASE_ORDER[idx + 1] as TurnPhase;
+        }
+        appendLog(game, `${active.playerName} has no untapped creatures — combat skipped`);
+        io.to(game.roomId).emit('game:announcement', { message: '⚔️ No attackers available — combat skipped', type: 'info' });
+      }
+    }
     broadcastGame(game);
   });
 
@@ -1147,6 +1165,68 @@ io.on('connection', (socket) => {
     appendLog(game, `${player.playerName} declared ${blocks.length} blocker${blocks.length !== 1 ? 's' : ''}`);
     console.log(`[blockersDeclared] emit → room ${game.roomId}`, player.playerName, blocks.length);
     io.to(game.roomId).emit('blockersDeclared', { defendingPlayerName: player.playerName, count: blocks.length });
+    broadcastGame(game);
+  });
+
+  socket.on('game:resolve_combat', ({ deadInstanceIds, lifeLost }) => {
+    const game = getGame(socket.id);
+    if (!game || game.phase !== 'damage') return;
+    const activePlayer = game.players[game.activePlayerIndex];
+    if (activePlayer.socketId !== socket.id) return;
+
+    const dead: { instanceId: string; name: string; playerName: string }[] = [];
+    const lifeLostResults: { targetPlayerName: string; amount: number }[] = [];
+
+    // Move dead creatures to graveyard
+    for (const instanceId of deadInstanceIds) {
+      for (const p of game.players) {
+        const idx = p.battlefield.findIndex(c => c.instanceId === instanceId);
+        if (idx !== -1) {
+          const [card] = p.battlefield.splice(idx, 1);
+          card.tapped = false;
+          p.graveyard.push(card);
+          dead.push({ instanceId, name: card.name, playerName: p.playerName });
+          appendLog(game, `${card.name} → ${p.playerName}'s graveyard (combat damage)`);
+          break;
+        }
+      }
+    }
+
+    // Apply life loss and commander damage
+    for (const ll of lifeLost) {
+      const target = game.players.find(p => p.userId === ll.targetUserId);
+      if (!target || target.eliminated) continue;
+      const prevLife = target.life;
+      target.life = Math.max(0, target.life - ll.amount);
+      appendLog(game, `${target.playerName}: −${ll.amount} combat damage → ${target.life} life`);
+      lifeLostResults.push({ targetPlayerName: target.playerName, amount: ll.amount });
+
+      if (ll.isCommanderDmg) {
+        // Find the attacker's socketId for the commander damage key
+        const attackingP = game.players.find(p =>
+          p.battlefield.some(c => c.instanceId === ll.fromInstanceId) ||
+          p.graveyard.some(c => c.instanceId === ll.fromInstanceId)
+        );
+        if (attackingP) {
+          const prev = target.commanderDamage[attackingP.socketId] ?? 0;
+          target.commanderDamage[attackingP.socketId] = prev + ll.amount;
+          const cmdCard = [...attackingP.battlefield, ...attackingP.graveyard].find(c => c.instanceId === ll.fromInstanceId);
+          appendLog(game, `Commander damage: ${cmdCard?.name ?? '?'} → ${target.playerName} total ${target.commanderDamage[attackingP.socketId]}`);
+          if (target.commanderDamage[attackingP.socketId] >= 21 && !target.eliminated && !game.pendingElimination) {
+            game.pendingElimination = { socketId: target.socketId, playerName: target.playerName, reason: `21+ commander damage from ${cmdCard?.name ?? '?'}` };
+          }
+        }
+      }
+
+      if (prevLife > 0 && target.life <= 0 && !game.pendingElimination) {
+        game.pendingElimination = { socketId: target.socketId, playerName: target.playerName, reason: `Life: ${target.life}` };
+      }
+    }
+
+    // Advance to end_combat and clear combat state
+    game.combatState = null;
+    game.phase = 'end_combat';
+    io.to(game.roomId).emit('combatResolved', { dead, lifeLost: lifeLostResults });
     broadcastGame(game);
   });
 

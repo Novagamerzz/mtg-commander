@@ -102,10 +102,14 @@ export interface CombatAttackEntry {
   attackerId: string; attackerName: string; attackerImage: string;
   attackingUserId: string; attackingPlayerName: string;
   targetUserId: string; targetPlayerName: string;
+  attackerPower: string | null; attackerToughness: string | null;
+  attackerCounters: Record<string, number>; attackerIsCommander: boolean;
 }
 export interface CombatBlockEntry {
   blockerId: string; blockerName: string; blockerImage: string;
   blockingAttackerId: string; defendingUserId: string; defendingPlayerName: string;
+  blockerPower: string | null; blockerToughness: string | null;
+  blockerCounters: Record<string, number>; blockerIsCommander: boolean;
 }
 export interface PersonalCombatState {
   attacks: CombatAttackEntry[];
@@ -149,6 +153,7 @@ export interface ServerToClientEvents {
   'attackersDeclared': (data: { attackingPlayerName: string; count: number }) => void;
   'blockersDeclared': (data: { defendingPlayerName: string; count: number }) => void;
   'combatEnded': () => void;
+  'combatResolved': (data: { dead: { instanceId: string; name: string; playerName: string }[]; lifeLost: { targetPlayerName: string; amount: number }[] }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -199,4 +204,5 @@ export interface ClientToServerEvents {
   'chat:send': (message: string) => void;
   'game:declare_attackers': (payload: { attacks: { attackerId: string; targetUserId: string }[] }) => void;
   'game:declare_blockers': (payload: { blocks: { blockerId: string; blockingAttackerId: string }[] }) => void;
+  'game:resolve_combat': (payload: { deadInstanceIds: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] }) => void;
 }

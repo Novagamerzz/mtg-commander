@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { socket } from '../lib/socket';
 import { useAuth } from '../contexts/AuthContext';
-import type { PersonalGameState, PersonalPlayerState, GameCard, TurnPhase, PersonalCombatState } from '../lib/types';
+import type { PersonalGameState, PersonalPlayerState, GameCard, TurnPhase, PersonalCombatState, CombatAttackEntry, CombatBlockEntry } from '../lib/types';
 
 // ── Zone viewer modal ─────────────────────────────────────────────────────────
 
@@ -1167,6 +1167,181 @@ function ZoneHeader({ player, color, isMonarch }: { player: PersonalPlayerState;
   );
 }
 
+// ── Combat utility ───────────────────────────────────────────────────────────
+
+function effectivePT(basePow: string | null, baseTou: string | null, counters: Record<string, number> = {}) {
+  const delta = (counters['+1/+1'] ?? 0) - (counters['-1/-1'] ?? 0);
+  return {
+    power:     Math.max(0, (parseInt(basePow ?? '0', 10) || 0) + delta),
+    toughness: Math.max(0, (parseInt(baseTou ?? '1', 10) || 1) + delta),
+  };
+}
+
+interface CombatCalcResult {
+  attacker: CombatAttackEntry;
+  blockers: CombatBlockEntry[];
+  attackerDies: boolean;
+  dyingBlockers: string[]; // instanceIds
+  isUnblocked: boolean;
+  excessDamage: number;
+  damageToPlayer: number;
+}
+
+function calcCombatResults(attacks: CombatAttackEntry[], blocks: CombatBlockEntry[]): CombatCalcResult[] {
+  return attacks.map(atk => {
+    const myBlocks = blocks.filter(b => b.blockingAttackerId === atk.attackerId);
+    const atkPT = effectivePT(atk.attackerPower, atk.attackerToughness, atk.attackerCounters);
+
+    if (myBlocks.length === 0) {
+      return { attacker: atk, blockers: [], attackerDies: false, dyingBlockers: [], isUnblocked: true, excessDamage: 0, damageToPlayer: atkPT.power };
+    }
+
+    const totalBlockerPower = myBlocks.reduce((s, b) => s + effectivePT(b.blockerPower, b.blockerToughness, b.blockerCounters).power, 0);
+    const attackerDies = totalBlockerPower >= atkPT.toughness;
+
+    // Attacker assigns damage to blockers in order
+    const dyingBlockers: string[] = [];
+    let rem = atkPT.power;
+    for (const b of myBlocks) {
+      const bPT = effectivePT(b.blockerPower, b.blockerToughness, b.blockerCounters);
+      if (rem >= bPT.toughness) { dyingBlockers.push(b.blockerId); rem -= bPT.toughness; }
+    }
+    const totalBlockerToughness = myBlocks.reduce((s, b) => s + effectivePT(b.blockerPower, b.blockerToughness, b.blockerCounters).toughness, 0);
+    const excessDamage = Math.max(0, atkPT.power - totalBlockerToughness);
+
+    return { attacker: atk, blockers: myBlocks, attackerDies, dyingBlockers, isUnblocked: false, excessDamage, damageToPlayer: 0 };
+  });
+}
+
+// ── Combat Results Modal ──────────────────────────────────────────────────────
+
+interface CombatResultsModalProps {
+  combatState: PersonalCombatState;
+  onConfirm: (payload: { deadInstanceIds: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] }) => void;
+  onCancel: () => void;
+}
+
+function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsModalProps) {
+  const results = React.useMemo(() => calcCombatResults(combatState.attacks, combatState.blocks), [combatState]);
+  const [indestructible, setIndestructible] = React.useState<Set<string>>(new Set());
+  const [trampleOn, setTrampleOn] = React.useState<Set<string>>(new Set());
+  const [trampleDmg, setTrampleDmg] = React.useState<Record<string, number>>({});
+
+  function toggleIndestructible(id: string) {
+    setIndestructible(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  }
+
+  function handleConfirm() {
+    const deadInstanceIds: string[] = [];
+    const lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] = [];
+
+    for (const r of results) {
+      if (r.attackerDies && !indestructible.has(r.attacker.attackerId)) deadInstanceIds.push(r.attacker.attackerId);
+      for (const bid of r.dyingBlockers) { if (!indestructible.has(bid)) deadInstanceIds.push(bid); }
+
+      if (r.isUnblocked && r.damageToPlayer > 0) {
+        lifeLost.push({ targetUserId: r.attacker.targetUserId, amount: r.damageToPlayer, fromInstanceId: r.attacker.attackerId, isCommanderDmg: r.attacker.attackerIsCommander });
+      }
+      if (!r.isUnblocked && trampleOn.has(r.attacker.attackerId)) {
+        const excess = trampleDmg[r.attacker.attackerId] ?? r.excessDamage;
+        if (excess > 0) lifeLost.push({ targetUserId: r.attacker.targetUserId, amount: excess, fromInstanceId: r.attacker.attackerId, isCommanderDmg: r.attacker.attackerIsCommander });
+      }
+    }
+
+    onConfirm({ deadInstanceIds, lifeLost });
+  }
+
+  const overlay: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+  const box: React.CSSProperties = { background: '#0a0f1a', border: '1px solid rgba(251,146,60,0.5)', borderRadius: 16, padding: '20px 24px', maxWidth: 560, width: '90vw', maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 24px 64px rgba(0,0,0,0.95)' };
+  const row: React.CSSProperties = { display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' };
+  const pill = (bg: string, color: string): React.CSSProperties => ({ background: bg, color, borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 800, whiteSpace: 'nowrap' });
+
+  return (
+    <div style={overlay} onMouseDown={e => e.stopPropagation()}>
+      <div style={box}>
+        <p style={{ fontSize: 14, fontWeight: 900, color: '#fb923c', marginBottom: 14 }}>⚔️ Combat Results</p>
+
+        {results.map(r => {
+          const atkPT = effectivePT(r.attacker.attackerPower, r.attacker.attackerToughness, r.attacker.attackerCounters);
+          return (
+            <div key={r.attacker.attackerId} style={row}>
+              {/* Attacker */}
+              <div style={{ minWidth: 120 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: '#f87171' }}>⚔️ {r.attacker.attackerName}</span>
+                  {r.attacker.attackerPower != null && <span style={pill('rgba(239,68,68,0.2)', '#f87171')}>{atkPT.power}/{atkPT.toughness}</span>}
+                  {r.attacker.attackerIsCommander && <span style={pill('rgba(250,204,21,0.2)', '#fbbf24')}>CMD</span>}
+                </div>
+                {r.attackerDies && (
+                  <label style={{ fontSize: 10, color: '#f87171', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={indestructible.has(r.attacker.attackerId)} onChange={() => toggleIndestructible(r.attacker.attackerId)} />
+                    Indestructible (spare)
+                  </label>
+                )}
+              </div>
+              {/* Result */}
+              <div style={{ flex: 1 }}>
+                {r.isUnblocked ? (
+                  <div>
+                    <span style={{ fontSize: 11, color: '#facc15', fontWeight: 700 }}>UNBLOCKED → {r.attacker.targetPlayerName}</span>
+                    <span style={{ fontSize: 11, color: '#e5e7eb', marginLeft: 6 }}>deals {atkPT.power} damage</span>
+                    {r.attacker.attackerIsCommander && <span style={{ fontSize: 10, color: '#fbbf24', marginLeft: 4 }}>👑 +cmdr dmg</span>}
+                  </div>
+                ) : (
+                  <div>
+                    {r.blockers.map(b => {
+                      const bPT = effectivePT(b.blockerPower, b.blockerToughness, b.blockerCounters);
+                      const dies = r.dyingBlockers.includes(b.blockerId);
+                      return (
+                        <div key={b.blockerId} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                          <span style={{ fontSize: 10, color: dies ? '#f87171' : '#86efac' }}>🛡 {b.blockerName}</span>
+                          {b.blockerPower != null && <span style={pill('rgba(74,222,128,0.15)', '#86efac')}>{bPT.power}/{bPT.toughness}</span>}
+                          {dies ? (
+                            <label style={{ fontSize: 9, color: '#f87171', display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+                              <input type="checkbox" checked={indestructible.has(b.blockerId)} onChange={() => toggleIndestructible(b.blockerId)} />
+                              Indestructible
+                            </label>
+                          ) : <span style={{ fontSize: 9, color: '#4ade80' }}>survives</span>}
+                        </div>
+                      );
+                    })}
+                    {r.excessDamage > 0 && (
+                      <label style={{ fontSize: 10, color: '#fb923c', display: 'flex', alignItems: 'center', gap: 4, marginTop: 4, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={trampleOn.has(r.attacker.attackerId)}
+                          onChange={() => setTrampleOn(prev => { const s = new Set(prev); s.has(r.attacker.attackerId) ? s.delete(r.attacker.attackerId) : s.add(r.attacker.attackerId); return s; })} />
+                        Has Trample — excess damage:
+                        <input type="number" min={0} max={r.excessDamage}
+                          value={trampleDmg[r.attacker.attackerId] ?? r.excessDamage}
+                          onChange={e => setTrampleDmg(prev => ({ ...prev, [r.attacker.attackerId]: Math.max(0, parseInt(e.target.value) || 0) }))}
+                          style={{ width: 40, fontSize: 10, background: '#1e293b', border: '1px solid #334155', color: '#e5e7eb', borderRadius: 4, padding: '1px 4px' }} />
+                        → {r.attacker.targetPlayerName}
+                        {r.attacker.attackerIsCommander && <span style={{ fontSize: 9, color: '#fbbf24' }}>👑</span>}
+                      </label>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        {results.length === 0 && <p style={{ fontSize: 12, color: '#4b5563', textAlign: 'center', padding: '12px 0' }}>No attackers — no combat damage.</p>}
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
+          <button onClick={onCancel}
+            style={{ padding: '8px 16px', borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', color: '#9ca3af' }}>
+            Cancel
+          </button>
+          <button onClick={handleConfirm}
+            style={{ padding: '8px 18px', borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer', background: 'linear-gradient(135deg,#ea580c,#c2410c)', border: '1px solid rgba(251,146,60,0.6)', color: '#fff', boxShadow: '0 0 14px rgba(251,146,60,0.3)' }}>
+            ✓ Confirm Deaths &amp; Apply Damage
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Combat Panel ─────────────────────────────────────────────────────────────
 
 interface CombatPanelProps {
@@ -1185,7 +1360,9 @@ interface CombatPanelProps {
   onConfirmAttackers: () => void;
   onSelectBlockerToAssign: (id: string | null) => void;
   onAssignBlocker: (attackerId: string) => void;
+  onRemoveBlocker: (blockerId: string) => void;
   onConfirmBlockers: () => void;
+  onResolveDamage: () => void;
   onEndPhase: () => void;
 }
 
@@ -1193,7 +1370,7 @@ function CombatPanel({
   phase, combatState, isMyTurn, myUserId, myBattlefield, opponentPlayers,
   selectedAttackers, attackerTargets, selectedBlockerToAssign, blockerAssignments,
   onToggleAttacker, onSetAttackerTarget, onConfirmAttackers,
-  onSelectBlockerToAssign, onAssignBlocker, onConfirmBlockers, onEndPhase,
+  onSelectBlockerToAssign, onAssignBlocker, onRemoveBlocker, onConfirmBlockers, onResolveDamage, onEndPhase,
 }: CombatPanelProps) {
   const COMBAT_PHASES: TurnPhase[] = ['begin_combat','declare_attackers','declare_blockers','damage','end_combat'];
   if (!COMBAT_PHASES.includes(phase)) return null;
@@ -1295,59 +1472,58 @@ function CombatPanel({
       return (
         <div style={panelStyle}>
           <p style={{ fontSize: 11, color: '#f87171', fontWeight: 700, marginBottom: 8 }}>🛡 DECLARE BLOCKERS</p>
-          <div style={{ display: 'flex', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+          {/* Attacker list with assigned blockers */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
             {attacks.map(atk => {
-              const assignedBlockerId = Array.from(blockerAssignments.entries()).find(([,aid]) => aid === atk.attackerId)?.[0];
-              const assignedCard = assignedBlockerId ? myBattlefield.find(c => c.instanceId === assignedBlockerId) : null;
+              const atkPT = effectivePT(atk.attackerPower, atk.attackerToughness, atk.attackerCounters);
+              const assignedBlockerIds = Array.from(blockerAssignments.entries())
+                .filter(([, aid]) => aid === atk.attackerId)
+                .map(([bid]) => bid);
+              const assignedCards = assignedBlockerIds.map(bid => myBattlefield.find(c => c.instanceId === bid)).filter(Boolean);
               return (
-                <div key={atk.attackerId} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                  <div style={{ position: 'relative', width: 60, height: 84, borderRadius: 6, overflow: 'hidden',
-                    border: '2px solid rgba(239,68,68,0.8)' }}>
+                <div key={atk.attackerId} style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '8px 10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: assignedCards.length > 0 ? 6 : 0 }}>
                     {atk.attackerImage
-                      ? <img src={atk.attackerImage} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      : <div style={{ width: '100%', height: '100%', background: '#1f2937', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <span style={{ fontSize: 7, color: '#6b7280', textAlign: 'center', padding: 2 }}>{atk.attackerName}</span>
-                        </div>}
-                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.8)',
-                      fontSize: 7, color: '#f87171', textAlign: 'center', padding: 1, fontWeight: 700 }}>ATK</div>
-                  </div>
-                  <span style={{ fontSize: 8, color: '#9ca3af', textAlign: 'center', maxWidth: 60,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{atk.attackerName}</span>
-                  {assignedCard ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                      <div style={{ width: 50, height: 70, borderRadius: 5, overflow: 'hidden', border: '2px solid rgba(74,222,128,0.8)' }}>
-                        {assignedCard.imageUri
-                          ? <img src={assignedCard.imageUri} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          : <div style={{ width: '100%', height: '100%', background: '#1f2937' }} />}
-                      </div>
-                      <button onClick={() => {
-                        setBlockerAssignments_NOOP: void 0;
-                        onAssignBlocker(''); // signal to remove
-                        const newMap = new Map(blockerAssignments);
-                        newMap.delete(assignedBlockerId!);
-                        onSelectBlockerToAssign(null);
-                      }}
-                        style={{ fontSize: 8, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer' }}>
-                        × Remove
-                      </button>
+                      ? <img src={atk.attackerImage} style={{ width: 36, height: 50, objectFit: 'cover', borderRadius: 4, border: '1px solid rgba(239,68,68,0.6)', flexShrink: 0 }} />
+                      : <div style={{ width: 36, height: 50, background: '#1f2937', borderRadius: 4, flexShrink: 0 }} />}
+                    <div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: '#f87171' }}>⚔️ {atk.attackerName}</span>
+                      {atk.attackerPower != null && <span style={{ fontSize: 10, color: '#9ca3af', marginLeft: 4 }}>{atkPT.power}/{atkPT.toughness}</span>}
+                      <div style={{ fontSize: 9, color: '#6b7280' }}>→ {atk.targetPlayerName}</div>
                     </div>
-                  ) : (
-                    <button
-                      onClick={() => selectedBlockerToAssign ? onAssignBlocker(atk.attackerId) : undefined}
-                      style={{ fontSize: 9, padding: '3px 8px', borderRadius: 5, cursor: 'pointer',
-                        background: selectedBlockerToAssign ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.05)',
-                        border: selectedBlockerToAssign ? '1px solid rgba(74,222,128,0.5)' : '1px solid rgba(255,255,255,0.1)',
-                        color: selectedBlockerToAssign ? '#86efac' : '#6b7280' }}>
-                      {selectedBlockerToAssign ? '→ Block here' : 'No blocker'}
-                    </button>
+                    {selectedBlockerToAssign && (
+                      <button onClick={() => onAssignBlocker(atk.attackerId)}
+                        style={{ marginLeft: 'auto', fontSize: 9, padding: '3px 8px', borderRadius: 5, cursor: 'pointer',
+                          background: 'rgba(74,222,128,0.2)', border: '1px solid rgba(74,222,128,0.5)', color: '#86efac' }}>
+                        + Block here
+                      </button>
+                    )}
+                  </div>
+                  {/* Assigned blockers */}
+                  {assignedCards.length > 0 && (
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {assignedCards.map(c => c && (
+                        <div key={c.instanceId} style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.4)', borderRadius: 5, padding: '2px 6px' }}>
+                          <span style={{ fontSize: 9, color: '#86efac' }}>🛡 {c.name.split(',')[0]}</span>
+                          <button onClick={() => onRemoveBlocker(c.instanceId)}
+                            style={{ fontSize: 8, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px' }}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {assignedCards.length === 0 && !selectedBlockerToAssign && (
+                    <span style={{ fontSize: 9, color: '#4b5563', fontStyle: 'italic' }}>No blocker assigned</span>
                   )}
                 </div>
               );
             })}
           </div>
+          {/* My creatures to assign */}
           {myUntappedCreatures.length > 0 && (
             <div style={{ marginBottom: 8 }}>
-              <p style={{ fontSize: 10, color: '#6b7280', marginBottom: 4 }}>Select a creature to block with:</p>
+              <p style={{ fontSize: 10, color: '#6b7280', marginBottom: 4 }}>
+                {selectedBlockerToAssign ? '→ Now click an attacker above to assign blocker' : 'Click a creature to select as blocker:'}
+              </p>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {myUntappedCreatures.map(c => {
                   const isSelected = selectedBlockerToAssign === c.instanceId;
@@ -1355,13 +1531,12 @@ function CombatPanel({
                   return (
                     <button key={c.instanceId}
                       onClick={() => onSelectBlockerToAssign(isSelected ? null : c.instanceId)}
-                      disabled={isAssigned}
-                      style={{ fontSize: 10, padding: '3px 8px', borderRadius: 5, cursor: isAssigned ? 'default' : 'pointer',
-                        opacity: isAssigned ? 0.4 : 1,
+                      style={{ fontSize: 10, padding: '3px 8px', borderRadius: 5, cursor: 'pointer',
+                        opacity: isAssigned ? 0.5 : 1,
                         background: isSelected ? 'rgba(74,222,128,0.2)' : 'rgba(255,255,255,0.05)',
                         border: isSelected ? '1px solid rgba(74,222,128,0.6)' : '1px solid rgba(255,255,255,0.12)',
-                        color: isSelected ? '#86efac' : '#d1d5db' }}>
-                      {c.name.split(',')[0]}
+                        color: isSelected ? '#86efac' : isAssigned ? '#4b5563' : '#d1d5db' }}>
+                      {c.name.split(',')[0]}{isAssigned ? ' ✓' : ''}
                     </button>
                   );
                 })}
@@ -1394,29 +1569,41 @@ function CombatPanel({
   if (phase === 'damage') {
     const attacks = combatState?.attacks ?? [];
     const blocks = combatState?.blocks ?? [];
+    const results = attacks.length > 0 && combatState ? calcCombatResults(attacks, blocks) : [];
     return (
       <div style={panelStyle}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
           <p style={{ fontSize: 11, color: '#fb923c', fontWeight: 700 }}>💥 DAMAGE STEP</p>
-          {isMyTurn && <button style={primaryBtn} onClick={onEndPhase}>Resolve Damage →</button>}
+          {isMyTurn && <button style={primaryBtn} onClick={onResolveDamage}>⚔️ Calculate &amp; Resolve →</button>}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {attacks.map(atk => {
-            const assignedBlocks = blocks.filter(b => b.blockingAttackerId === atk.attackerId);
+          {results.map(r => {
+            const atkPT = effectivePT(r.attacker.attackerPower, r.attacker.attackerToughness, r.attacker.attackerCounters);
+            const myBlocks = blocks.filter(b => b.blockingAttackerId === r.attacker.attackerId);
             return (
-              <div key={atk.attackerId} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#e5e7eb' }}>
-                <span style={{ color: '#f87171', fontWeight: 700 }}>⚔️ {atk.attackerName}</span>
-                <span style={{ color: '#6b7280' }}>→</span>
-                {assignedBlocks.length === 0 ? (
-                  <span style={{ color: '#facc15', fontWeight: 700 }}>UNBLOCKED ({atk.targetPlayerName})</span>
-                ) : (
-                  <span style={{ color: '#86efac' }}>blocked by {assignedBlocks.map(b => b.blockerName).join(', ')}</span>
+              <div key={r.attacker.attackerId} style={{ fontSize: 11, color: '#e5e7eb', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: '#f87171', fontWeight: 700 }}>⚔️ {r.attacker.attackerName}</span>
+                  {r.attacker.attackerPower != null && <span style={{ fontSize: 9, color: '#6b7280' }}>{atkPT.power}/{atkPT.toughness}</span>}
+                  <span style={{ color: '#6b7280' }}>→</span>
+                  {myBlocks.length === 0 ? (
+                    <span style={{ color: '#facc15', fontWeight: 700 }}>UNBLOCKED 🎯 {r.attacker.targetPlayerName} ({atkPT.power} dmg)</span>
+                  ) : (
+                    <span style={{ color: '#86efac' }}>blocked by {myBlocks.map(b => {
+                      const bPT = effectivePT(b.blockerPower, b.blockerToughness, b.blockerCounters);
+                      return `${b.blockerName} ${b.blockerPower != null ? `${bPT.power}/${bPT.toughness}` : ''}`;
+                    }).join(', ')}</span>
+                  )}
+                </div>
+                {!r.isUnblocked && r.excessDamage > 0 && (
+                  <div style={{ fontSize: 9, color: '#fb923c', marginLeft: 16 }}>Excess: {r.excessDamage} (trample if applicable)</div>
                 )}
               </div>
             );
           })}
           {attacks.length === 0 && <span style={{ fontSize: 11, color: '#4b5563' }}>No attackers declared.</span>}
         </div>
+        {!isMyTurn && <p style={{ fontSize: 10, color: '#6b7280', marginTop: 6, textAlign: 'center' }}>Waiting for active player to resolve damage…</p>}
       </div>
     );
   }
@@ -2361,6 +2548,7 @@ export default function GameBoardPage() {
   const [attackerTargets, setAttackerTargets] = useState<Map<string, string>>(new Map());
   const [selectedBlockerToAssign, setSelectedBlockerToAssign] = useState<string | null>(null);
   const [blockerAssignments, setBlockerAssignments] = useState<Map<string, string>>(new Map());
+  const [showCombatResults, setShowCombatResults] = useState(false);
   const [timingToast, setTimingToast] = useState<string | null>(null);
   const [overHand, setOverHand] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2443,6 +2631,18 @@ export default function GameBoardPage() {
       setAttackerTargets(new Map());
       setSelectedBlockerToAssign(null);
       setBlockerAssignments(new Map());
+      setShowCombatResults(false);
+    });
+    socket.on('combatResolved', ({ dead, lifeLost }) => {
+      const lines = [
+        ...dead.map(d => `💀 ${d.name} (${d.playerName}) → graveyard`),
+        ...lifeLost.map(l => `💔 ${l.targetPlayerName} takes ${l.amount} damage`),
+      ];
+      if (lines.length) {
+        setTimingToast(lines.slice(0, 3).join(' | '));
+        if (toastTimer.current) clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setTimingToast(null), 5000);
+      }
     });
     socket.on('cardCounterUpdate', ({ playerId, instanceId, counters }) => {
       setGameState((prev) => {
@@ -2473,6 +2673,7 @@ export default function GameBoardPage() {
       socket.off('attackersDeclared');
       socket.off('blockersDeclared');
       socket.off('combatEnded');
+      socket.off('combatResolved');
       socket.off('cardCounterUpdate');
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (announcementTimer.current) clearTimeout(announcementTimer.current);
@@ -2671,6 +2872,15 @@ export default function GameBoardPage() {
     setBlockerAssignments(new Map());
   }
 
+  function handleRemoveBlocker(blockerId: string) {
+    setBlockerAssignments(prev => { const m = new Map(prev); m.delete(blockerId); return m; });
+  }
+
+  function handleResolveCombat(payload: { deadInstanceIds: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] }) {
+    socket.emit('game:resolve_combat', payload);
+    setShowCombatResults(false);
+  }
+
   // ── Timing helper ─────────────────────────────────────────────────────────────
 
   function cardTimingStatus(card: GameCard): { playable: boolean; reason: string } {
@@ -2823,9 +3033,20 @@ export default function GameBoardPage() {
           setBlockerAssignments(prev => { const m = new Map(prev); m.set(selectedBlockerToAssign, attackerId); return m; });
           setSelectedBlockerToAssign(null);
         }}
+        onRemoveBlocker={handleRemoveBlocker}
         onConfirmBlockers={handleDeclareBlockers}
+        onResolveDamage={() => setShowCombatResults(true)}
         onEndPhase={emit.endPhase}
       />
+
+      {/* ── Combat Results Modal ── */}
+      {showCombatResults && gameState.combatState && (
+        <CombatResultsModal
+          combatState={gameState.combatState}
+          onConfirm={handleResolveCombat}
+          onCancel={() => setShowCombatResults(false)}
+        />
+      )}
 
       {/* ── Shared table canvas (fills space between header and info bar) ── */}
       <div className="flex-1 overflow-hidden min-h-0">
