@@ -628,11 +628,15 @@ const COUNTER_META: Record<string, { sym: string; label: string; color: string; 
 function CounterBadge({ type, count }: { type: string; count: number }) {
   const m = COUNTER_META[type] ?? { sym: type.slice(0, 4), color: '#e2e8f0', bg: '#374151' };
   return (
-    <div style={{ background: m.bg, color: m.color, borderRadius: 4, padding: '1px 4px',
-      fontSize: 9, fontWeight: 800, lineHeight: 1.3,
-      border: '1px solid rgba(255,255,255,0.18)', whiteSpace: 'nowrap' }}>
-      {count > 1 && <span style={{ marginRight: 1 }}>{count}×</span>}
-      {m.sym}
+    <div style={{
+      background: 'rgba(0,0,0,0.88)', color: m.color,
+      borderRadius: 99, padding: '2px 6px',
+      fontSize: 11, fontWeight: 800, lineHeight: 1.3,
+      border: `1px solid ${m.color}66`,
+      whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 3,
+    }}>
+      <span>{m.sym}</span>
+      <span style={{ color: '#fff' }}>{count}</span>
     </div>
   );
 }
@@ -734,26 +738,23 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
         )}
       </div>
 
-      {/* Keyword badges — top-left */}
-      {(card.keywords ?? []).length > 0 && (
-        <div style={{ position: 'absolute', top: 3, left: 3, display: 'flex', flexWrap: 'wrap',
-          gap: 2, zIndex: 15, pointerEvents: 'none', maxWidth: '90%' }}>
-          {(card.keywords ?? []).map((kw) => (
-            <span key={kw} style={{
-              background: `${KEYWORD_COLOR[kw] ?? '#64748b'}33`,
-              border: `1px solid ${KEYWORD_COLOR[kw] ?? '#64748b'}88`,
-              color: KEYWORD_COLOR[kw] ?? '#e2e8f0',
-              borderRadius: 3, padding: '1px 3px', fontSize: 8, fontWeight: 800, letterSpacing: 0.4,
-            }}>{KEYWORD_ABBR[kw] ?? kw.slice(0, 3).toUpperCase()}</span>
-          ))}
-        </div>
-      )}
-
-      {/* Counter badges — bottom-left */}
-      {hasCounters && (
-        <div style={{ position: 'absolute', bottom: 4, left: 3, display: 'flex', flexWrap: 'wrap',
-          gap: 2, zIndex: 15, pointerEvents: 'none', maxWidth: '70%' }}>
-          {Object.entries(counters).filter(([, n]) => n > 0).map(([type, n]) => (
+      {/* Keyword + counter badges — top-left, stacked vertically */}
+      {((card.keywords ?? []).length > 0 || hasCounters) && (
+        <div style={{ position: 'absolute', top: 3, left: 3, display: 'flex', flexDirection: 'column',
+          gap: 2, zIndex: 15, pointerEvents: 'none', maxWidth: '75%' }}>
+          {(card.keywords ?? []).length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+              {(card.keywords ?? []).map((kw) => (
+                <span key={kw} style={{
+                  background: `${KEYWORD_COLOR[kw] ?? '#64748b'}33`,
+                  border: `1px solid ${KEYWORD_COLOR[kw] ?? '#64748b'}88`,
+                  color: KEYWORD_COLOR[kw] ?? '#e2e8f0',
+                  borderRadius: 3, padding: '1px 3px', fontSize: 8, fontWeight: 800, letterSpacing: 0.4,
+                }}>{KEYWORD_ABBR[kw] ?? kw.slice(0, 3).toUpperCase()}</span>
+              ))}
+            </div>
+          )}
+          {hasCounters && Object.entries(counters).filter(([, n]) => n > 0).map(([type, n]) => (
             <CounterBadge key={type} type={type} count={n} />
           ))}
         </div>
@@ -1417,25 +1418,23 @@ function TableCanvas({
                                 )}
                               </div>
                             </TappedCardWrapper>
-                            {/* Keyword badges */}
-                            {oppKeywords.length > 0 && (
-                              <div style={{ position: 'absolute', top: 3, left: 3, display: 'flex', flexWrap: 'wrap',
-                                gap: 2, pointerEvents: 'none', maxWidth: '90%' }}>
-                                {oppKeywords.map((kw) => (
-                                  <span key={kw} style={{
-                                    background: `${KEYWORD_COLOR[kw] ?? '#64748b'}33`,
-                                    border: `1px solid ${KEYWORD_COLOR[kw] ?? '#64748b'}88`,
-                                    color: KEYWORD_COLOR[kw] ?? '#e2e8f0',
-                                    borderRadius: 3, padding: '1px 3px', fontSize: 7, fontWeight: 800,
-                                  }}>{KEYWORD_ABBR[kw] ?? kw.slice(0, 3).toUpperCase()}</span>
-                                ))}
-                              </div>
-                            )}
-                            {/* Counter badges */}
-                            {oppHasCounters && (
-                              <div style={{ position: 'absolute', bottom: 26, left: 3, display: 'flex', flexWrap: 'wrap',
-                                gap: 2, pointerEvents: 'none', maxWidth: '70%' }}>
-                                {Object.entries(oppCounters).filter(([, n]) => n > 0).map(([type, n]) => (
+                            {/* Keyword + counter badges — top-left, stacked vertically */}
+                            {(oppKeywords.length > 0 || oppHasCounters) && (
+                              <div style={{ position: 'absolute', top: 3, left: 3, display: 'flex', flexDirection: 'column',
+                                gap: 2, pointerEvents: 'none', maxWidth: '75%', zIndex: 15 }}>
+                                {oppKeywords.length > 0 && (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                                    {oppKeywords.map((kw) => (
+                                      <span key={kw} style={{
+                                        background: `${KEYWORD_COLOR[kw] ?? '#64748b'}33`,
+                                        border: `1px solid ${KEYWORD_COLOR[kw] ?? '#64748b'}88`,
+                                        color: KEYWORD_COLOR[kw] ?? '#e2e8f0',
+                                        borderRadius: 3, padding: '1px 3px', fontSize: 7, fontWeight: 800,
+                                      }}>{KEYWORD_ABBR[kw] ?? kw.slice(0, 3).toUpperCase()}</span>
+                                    ))}
+                                  </div>
+                                )}
+                                {oppHasCounters && Object.entries(oppCounters).filter(([, n]) => n > 0).map(([type, n]) => (
                                   <CounterBadge key={type} type={type} count={n} />
                                 ))}
                               </div>
