@@ -920,6 +920,17 @@ const C_LW_BASE = 112, C_LH_BASE = 157; // lands slightly smaller
 const C_HGAP = 4, C_RGAP = 16;
 const C_LBLW = 80;
 
+// Blocker zone overlay dimensions (shown on opponent mats during combat)
+const BLOCKER_CARD_W = 90;
+const BLOCKER_CARD_H = Math.round(BLOCKER_CARD_W * C_H_BASE / C_W_BASE); // ~126
+const BLOCKER_ZONE_H = BLOCKER_CARD_H + 38;
+
+interface ConfirmedBlockerEntry {
+  defendingSocketId: string;
+  defendingPlayerName: string;
+  blockers: { instanceId: string; name: string; imageUri: string; power?: string; toughness?: string; counters?: Record<string, number>; typeLine?: string }[];
+}
+
 function cardSizeForZone(_groupCount: number, isLand: boolean, _zoneW: number, cardBase = C_W_BASE): { cW: number; cH: number } {
   const cW = isLand ? Math.round(cardBase * C_LW_BASE / C_W_BASE) : cardBase;
   const cH = Math.round(cW * C_H_BASE / C_W_BASE);
@@ -1155,6 +1166,7 @@ interface TableCanvasProps {
   me: PersonalPlayerState;
   opponents: PersonalPlayerState[];
   isDefendingPhase: boolean;
+  confirmedBlockers: ConfirmedBlockerEntry[];
   onTapCard: (id: string) => void;
   onGraveyardCard: (id: string) => void;
   onExileCard: (id: string) => void;
@@ -1179,7 +1191,7 @@ interface TableCanvasProps {
 }
 
 function TableCanvas({
-  me, opponents, isDefendingPhase,
+  me, opponents, isDefendingPhase, confirmedBlockers,
   onTapCard, onGraveyardCard, onExileCard, onReturnCmdCard, onReturnHandCard, onGiveControl, onDragStartCard,
   onPlayCard, onHover, onHoverEnd, onBfCardHover, onUpdateCounter, onSetPt, onSetKeywords,
   onDropToGy, onDropToEx, onOpenGy, onOpenEx, gyCards, exCards, monarchSocketId,
@@ -1438,6 +1450,65 @@ function TableCanvas({
                   </span>
                 </div>
               )}
+
+              {/* Confirmed blockers overlay — visible to all players during combat */}
+              {(() => {
+                const entry = confirmedBlockers.find(e => e.defendingSocketId === player.socketId);
+                if (!entry) return null;
+                return (
+                  <div style={{
+                    position: 'absolute', bottom: 44, left: 12, right: 12,
+                    height: BLOCKER_ZONE_H,
+                    background: 'rgba(20,5,5,0.9)',
+                    border: '2px solid rgba(239,68,68,0.85)',
+                    borderRadius: 10,
+                    boxShadow: '0 0 28px rgba(239,68,68,0.4), inset 0 0 16px rgba(239,68,68,0.08)',
+                    zIndex: 8,
+                    overflow: 'hidden',
+                    display: 'flex', flexDirection: 'column',
+                  }}>
+                    <div style={{ padding: '4px 12px', borderBottom: '1px solid rgba(239,68,68,0.28)',
+                      display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                      <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: 1.2,
+                        color: '#f87171', textTransform: 'uppercase' }}>🛡 BLOCKING</span>
+                      <span style={{ fontSize: 9, color: 'rgba(248,113,113,0.65)' }}>
+                        {entry.blockers.length} creature{entry.blockers.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4,
+                      padding: '4px 12px', overflowX: 'auto', overflowY: 'hidden' }}>
+                      {entry.blockers.map(card => (
+                        <div key={card.instanceId} style={{
+                          flexShrink: 0, width: BLOCKER_CARD_W, height: BLOCKER_CARD_H,
+                          position: 'relative', borderRadius: 6, overflow: 'hidden',
+                          border: '2px solid rgba(239,68,68,0.9)',
+                          boxShadow: '0 0 14px rgba(239,68,68,0.55)',
+                        }}>
+                          {card.imageUri ? (
+                            <img src={card.imageUri} alt={card.name}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              onMouseEnter={() => onHover(card as GameCard)}
+                              onMouseLeave={onHoverEnd}
+                            />
+                          ) : (
+                            <div style={{ width: '100%', height: '100%', background: '#1f2937',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <span style={{ fontSize: 7, color: '#6b7280', textAlign: 'center', padding: 2 }}>{card.name}</span>
+                            </div>
+                          )}
+                          {card.power != null && card.toughness != null && (card.typeLine ?? '').includes('Creature') && (
+                            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 18,
+                              background: 'rgba(0,0,0,0.88)', display: 'flex', alignItems: 'center',
+                              justifyContent: 'center', fontSize: 11, fontWeight: 800, color: '#f1f5f9' }}>
+                              {card.power}/{card.toughness}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           );
         })}
@@ -1997,6 +2068,7 @@ export default function GameBoardPage() {
   const [diceResult, setDiceResult] = useState<{ playerName: string; sides: number; result: number } | null>(null);
   const diceResultTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [confirmedBlockers, setConfirmedBlockers] = useState<ConfirmedBlockerEntry[]>([]);
   const [timingToast, setTimingToast] = useState<string | null>(null);
   const [overHand, setOverHand] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2064,11 +2136,16 @@ export default function GameBoardPage() {
       if (announcementTimer.current) clearTimeout(announcementTimer.current);
       announcementTimer.current = setTimeout(() => setAnnouncement(null), 6000);
     });
-    socket.on('blockersDeclared', ({ playerName, blockerIds }) => {
-      setTimingToast(`🛡 ${playerName} declared ${blockerIds.length} blocker${blockerIds.length !== 1 ? 's' : ''}`);
+    socket.on('blockersConfirmed', ({ defendingSocketId, defendingPlayerName, blockers }) => {
+      setConfirmedBlockers(prev => {
+        const filtered = prev.filter(e => e.defendingSocketId !== defendingSocketId);
+        return [...filtered, { defendingSocketId, defendingPlayerName, blockers }];
+      });
+      setTimingToast(`🛡 ${defendingPlayerName} is blocking with ${blockers.length} creature${blockers.length !== 1 ? 's' : ''}`);
       if (toastTimer.current) clearTimeout(toastTimer.current);
       toastTimer.current = setTimeout(() => setTimingToast(null), 4000);
     });
+    socket.on('combatEnded', () => setConfirmedBlockers([]));
     socket.on('cardCounterUpdate', ({ playerId, instanceId, counters }) => {
       setGameState((prev) => {
         if (!prev) return prev;
@@ -2095,7 +2172,8 @@ export default function GameBoardPage() {
       socket.off('game:dice_result');
       socket.off('game:error');
       socket.off('game:announcement');
-      socket.off('blockersDeclared');
+      socket.off('blockersConfirmed');
+      socket.off('combatEnded');
       socket.off('cardCounterUpdate');
       if (toastTimer.current) clearTimeout(toastTimer.current);
       if (announcementTimer.current) clearTimeout(announcementTimer.current);
@@ -2108,6 +2186,13 @@ export default function GameBoardPage() {
       commanderScryfallId.current = me.commandZone[0].scryfallId;
     }
   }, [gameState]);
+
+  // Clear confirmed blockers whenever the phase leaves combat (handles reconnect race)
+  useEffect(() => {
+    if (gameState?.phase && gameState.phase !== 'combat') {
+      setConfirmedBlockers([]);
+    }
+  }, [gameState?.phase]);
 
   // Keyboard shortcuts for hovered battlefield card
   useEffect(() => {
@@ -2390,6 +2475,7 @@ export default function GameBoardPage() {
           me={me}
           opponents={opponents}
           isDefendingPhase={!isMyTurn && gameState.phase === 'combat'}
+          confirmedBlockers={confirmedBlockers}
           onTapCard={emit.tapCard}
           onGraveyardCard={interceptGraveyard}
           onExileCard={interceptExile}

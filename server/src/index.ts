@@ -596,13 +596,16 @@ io.on('connection', (socket) => {
   socket.on('game:end_phase', () => {
     const game = getGame(socket.id);
     if (!game || game.players[game.activePlayerIndex]?.socketId !== socket.id) return;
+    const wasCombat = game.phase === 'combat';
     advancePhase(game);
+    if (wasCombat) io.to(game.roomId).emit('combatEnded');
     broadcastGame(game);
   });
 
   socket.on('game:end_turn', () => {
     const game = getGame(socket.id);
     if (!game || game.players[game.activePlayerIndex]?.socketId !== socket.id) return;
+    io.to(game.roomId).emit('combatEnded');
     advanceTurn(game);
     broadcastGame(game);
   });
@@ -1080,8 +1083,24 @@ io.on('connection', (socket) => {
     if (!game) return;
     const player = game.players.find(p => p.socketId === socket.id);
     if (!player) return;
-    appendLog(game, `${player.playerName} declared ${blockerIds.length} blocker${blockerIds.length !== 1 ? 's' : ''}`);
-    io.to(game.roomId).emit('blockersDeclared', { playerName: player.playerName, blockerIds });
+    const blockers = blockerIds
+      .map(id => player.battlefield.find(c => c.instanceId === id))
+      .filter((c): c is InternalCard => !!c)
+      .map(c => ({
+        instanceId: c.instanceId,
+        name: c.name,
+        imageUri: c.imageUri,
+        power: c.power,
+        toughness: c.toughness,
+        counters: c.counters,
+        typeLine: c.typeLine,
+      }));
+    appendLog(game, `${player.playerName} declared ${blockers.length} blocker${blockers.length !== 1 ? 's' : ''}`);
+    io.to(game.roomId).emit('blockersConfirmed', {
+      defendingSocketId: player.socketId,
+      defendingPlayerName: player.playerName,
+      blockers,
+    });
   });
 
   // ─── Disconnect ───────────────────────────────────────────────────────────────
