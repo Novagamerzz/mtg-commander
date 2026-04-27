@@ -655,16 +655,16 @@ function PtBar({ card }: { card: GameCard }) {
   };
   return (
     <div style={{
-      position: 'absolute', bottom: 0, left: 0, right: 0, height: 17,
+      position: 'absolute', bottom: 0, left: 0, right: 0, height: 22,
       background: 'rgba(0,0,0,0.86)', borderRadius: '0 0 6px 6px',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       gap: 2, zIndex: 20, pointerEvents: 'none',
-      fontSize: 10, fontWeight: 800, color: '#f1f5f9',
+      fontSize: 14, fontWeight: 800, color: '#f1f5f9',
     }}>
-      <span style={{ fontSize: 8, lineHeight: 1 }}>⚔</span>
+      <span style={{ fontSize: 11, lineHeight: 1 }}>⚔</span>
       <span>{fmt(basePow)}</span>
-      <span style={{ opacity: 0.35, fontSize: 9 }}>/</span>
-      <span style={{ fontSize: 8, lineHeight: 1 }}>🛡</span>
+      <span style={{ opacity: 0.35, fontSize: 12 }}>/</span>
+      <span style={{ fontSize: 11, lineHeight: 1 }}>🛡</span>
       <span>{fmt(baseTou)}</span>
     </div>
   );
@@ -954,10 +954,8 @@ interface CRow {
   slots: { id: string; groupSize: number; groupIndex: number; x: number }[];
 }
 
-const FAN_GAP = 22; // px gap between fanned same-name cards
-
 function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zoneW = CANVAS_W - 40, cardBase = C_W_BASE): CRow[] {
-  const gap = C_HGAP, rgap = C_RGAP, fanGap = FAN_GAP;
+  const gap = C_HGAP, rgap = C_RGAP;
   const out: CRow[] = [];
   let ry = 0;
   for (const { label, cards: rc, isLand } of groupByType(cards, rowDefs)) {
@@ -973,9 +971,9 @@ function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zo
     let x = C_LBLW;
     for (const [, group] of nameMap) {
       for (let gi = 0; gi < group.length; gi++) {
-        slots.push({ id: group[gi].instanceId, groupSize: group.length, groupIndex: gi, x: x + gi * fanGap });
+        slots.push({ id: group[gi].instanceId, groupSize: group.length, groupIndex: gi, x: x + gi * (cW + gap) });
       }
-      x += cW + gap;
+      x += group.length * (cW + gap);
     }
     out.push({ label, isLand, y: ry, cW, cH, slots });
     ry += cH + rgap;
@@ -1219,14 +1217,14 @@ function TableCanvas({
     setZoom(z);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Wheel: Ctrl/Cmd = camera zoom centred on cursor; plain = pan ─────────────
+  // ── Wheel: plain = camera zoom centred on cursor; Ctrl/Cmd = pan ─────────────
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const { zoom: z, pan: p } = camRef.current;
-      if (e.ctrlKey || e.metaKey) {
+      if (!e.ctrlKey && !e.metaKey) {
         const rect = el.getBoundingClientRect();
         const ox = e.clientX - rect.left, oy = e.clientY - rect.top;
         const factor = Math.exp(-e.deltaY * 0.005);
