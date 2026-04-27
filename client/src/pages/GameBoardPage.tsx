@@ -967,14 +967,6 @@ interface CRow {
   slots: CSlot[];
 }
 
-function stackShadow(depth: number): string | undefined {
-  if (depth <= 0) return undefined;
-  const n = Math.min(depth, 3);
-  return Array.from({ length: n }, (_, i) =>
-    `${(i + 1) * 4}px ${(i + 1) * 4}px 0 #0a0f1a, ${(i + 1) * 4 + 1}px ${(i + 1) * 4 + 1}px 0 rgba(100,116,139,0.35)`
-  ).join(', ');
-}
-
 function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zoneW = CANVAS_W - 40, cardBase = C_W_BASE): CRow[] {
   const gap = C_HGAP, rgap = C_RGAP;
   const out: CRow[] = [];
@@ -990,8 +982,17 @@ function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zo
     const slots: CSlot[] = [];
     let x = C_LBLW;
     for (const [, group] of nameMap) {
-      slots.push({ topId: group[0].instanceId, groupIds: group.map(c => c.instanceId), x });
-      x += cW + gap;
+      // Untapped copies → one stack slot; tapped copies → individual slots beside it
+      const untapped = group.filter(c => !c.tapped);
+      const tapped   = group.filter(c =>  c.tapped);
+      if (untapped.length > 0) {
+        slots.push({ topId: untapped[0].instanceId, groupIds: untapped.map(c => c.instanceId), x });
+        x += cW + gap;
+      }
+      for (const tc of tapped) {
+        slots.push({ topId: tc.instanceId, groupIds: [tc.instanceId], x });
+        x += cH + gap; // rotated card is landscape, takes cH horizontal space
+      }
     }
     out.push({ label, isLand, y: ry, cW, cH, slots });
     ry += cH + rgap;
@@ -1364,8 +1365,7 @@ function TableCanvas({
                   {row.slots.map(slot => {
                     const card = cardMap.get(slot.topId);
                     if (!card) return null;
-                    const depth = slot.groupIds.length - 1;
-                    const shadow = stackShadow(depth);
+                    const stackN = slot.groupIds.length;
                     const isPopoverOpen = stackPopover?.groupIds[0] === slot.topId && !stackPopover.isMyCard;
                     const oppCounters = card.counters ?? {};
                     const oppHasCounters = Object.values(oppCounters).some((n) => n > 0);
@@ -1375,28 +1375,47 @@ function TableCanvas({
                         position: 'absolute', left: slot.x, top: OPP_INFO_H + row.y, zIndex: 2,
                       }}
                         onMouseDown={e => e.stopPropagation()}>
-                        <div style={{ boxShadow: shadow, borderRadius: 6 }}>
-                          <TappedCardWrapper card={card} cardW={row.cW} cardH={row.cH}>
-                            <div onMouseEnter={() => onHover(card)} onMouseLeave={onHoverEnd}
-                              className="w-full h-full cursor-default">
-                              {card.faceDown ? (
-                                <div className="w-full h-full rounded flex flex-col items-center justify-center"
-                                  style={{ background: 'linear-gradient(135deg, #1e1b4b, #0f172a)',
-                                    border: '1px solid rgba(99,102,241,0.35)' }}>
-                                  <span style={{ fontSize: 12, opacity: 0.28 }}>🂠</span>
-                                </div>
-                              ) : card.imageUri ? (
-                                <img src={card.imageUri} className="w-full h-full object-cover rounded"
-                                  style={{ opacity: card.tapped ? 0.72 : 1,
-                                    border: card.tapped ? '1px solid rgba(250,204,21,0.4)' : '1px solid rgba(255,255,255,0.08)' }} />
-                              ) : (
-                                <div className="w-full h-full rounded flex items-center justify-center p-0.5"
-                                  style={{ background: '#1f2937', border: '1px solid #374151' }}>
-                                  <span style={{ fontSize: 6, color: '#6b7280' }}>{card.name.slice(0, 8)}</span>
-                                </div>
-                              )}
-                            </div>
-                          </TappedCardWrapper>
+                        <div style={{ position: 'relative', width: row.cW, height: row.cH }}>
+                          {/* Ghost cards — same image, dimmed, offset behind top card */}
+                          {stackN > 1 && slot.groupIds.slice(1, 4).map((gid, gi) => {
+                            const gc = cardMap.get(gid);
+                            return (
+                              <div key={gid} style={{
+                                position: 'absolute', top: (gi + 1) * 3, left: (gi + 1) * 3,
+                                width: row.cW, height: row.cH, borderRadius: 6, overflow: 'hidden',
+                                pointerEvents: 'none', zIndex: -(gi + 1),
+                              }}>
+                                {(gc ?? card).imageUri
+                                  ? <img src={(gc ?? card).imageUri} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.55 }} alt="" />
+                                  : <div style={{ width: '100%', height: '100%', background: '#1a2d40', border: '1px solid rgba(100,116,139,0.3)', borderRadius: 6 }} />
+                                }
+                              </div>
+                            );
+                          })}
+                          {/* Front card */}
+                          <div style={{ position: 'absolute', top: 0, left: 0 }}>
+                            <TappedCardWrapper card={card} cardW={row.cW} cardH={row.cH}>
+                              <div onMouseEnter={() => onHover(card)} onMouseLeave={onHoverEnd}
+                                className="w-full h-full cursor-default">
+                                {card.faceDown ? (
+                                  <div className="w-full h-full rounded flex flex-col items-center justify-center"
+                                    style={{ background: 'linear-gradient(135deg, #1e1b4b, #0f172a)',
+                                      border: '1px solid rgba(99,102,241,0.35)' }}>
+                                    <span style={{ fontSize: 12, opacity: 0.28 }}>🂠</span>
+                                  </div>
+                                ) : card.imageUri ? (
+                                  <img src={card.imageUri} className="w-full h-full object-cover rounded"
+                                    style={{ opacity: card.tapped ? 0.72 : 1,
+                                      border: card.tapped ? '1px solid rgba(250,204,21,0.4)' : '1px solid rgba(255,255,255,0.08)' }} />
+                                ) : (
+                                  <div className="w-full h-full rounded flex items-center justify-center p-0.5"
+                                    style={{ background: '#1f2937', border: '1px solid #374151' }}>
+                                    <span style={{ fontSize: 6, color: '#6b7280' }}>{card.name.slice(0, 8)}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </TappedCardWrapper>
+                          </div>
                           {/* Keyword badges */}
                           {oppKeywords.length > 0 && (
                             <div style={{ position: 'absolute', top: 3, left: 3, display: 'flex', flexWrap: 'wrap',
@@ -1413,7 +1432,7 @@ function TableCanvas({
                           )}
                           {/* Counter badges */}
                           {oppHasCounters && (
-                            <div style={{ position: 'absolute', bottom: 3, left: 3, display: 'flex', flexWrap: 'wrap',
+                            <div style={{ position: 'absolute', bottom: 26, left: 3, display: 'flex', flexWrap: 'wrap',
                               gap: 2, zIndex: 15, pointerEvents: 'none', maxWidth: '70%' }}>
                               {Object.entries(oppCounters).filter(([, n]) => n > 0).map(([type, n]) => (
                                 <CounterBadge key={type} type={type} count={n} />
@@ -1422,24 +1441,25 @@ function TableCanvas({
                           )}
                           {/* P/T bar */}
                           <PtBar card={card} />
+                          {/* Stack badge — bottom-right, only for N > 1 */}
+                          {stackN > 1 && (
+                            <div onClick={(e) => {
+                              e.stopPropagation();
+                              setStackPopover(isPopoverOpen ? null : {
+                                groupIds: slot.groupIds, isMyCard: false,
+                                canvasX: slot.x, canvasY: OPP_INFO_H + row.y, cW: row.cW, cH: row.cH,
+                              });
+                            }}
+                              style={{ position: 'absolute', bottom: 6, right: 6, zIndex: 20,
+                                background: isPopoverOpen ? '#1d4ed8' : 'rgba(37,99,235,0.92)',
+                                color: '#fff', borderRadius: 4, padding: '1px 5px', fontSize: 9,
+                                fontWeight: 900, border: '1px solid rgba(255,255,255,0.25)',
+                                cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.6)',
+                                userSelect: 'none' }}>
+                              ×{stackN}
+                            </div>
+                          )}
                         </div>
-                        {/* Stack badge — clickable to expand */}
-                        {depth > 0 && (
-                          <div onClick={(e) => {
-                            e.stopPropagation();
-                            setStackPopover(isPopoverOpen ? null : {
-                              groupIds: slot.groupIds, isMyCard: false,
-                              canvasX: slot.x, canvasY: OPP_INFO_H + row.y, cW: row.cW, cH: row.cH,
-                            });
-                          }}
-                            style={{ position: 'absolute', top: -7, left: -7, zIndex: 30,
-                              background: '#2563eb', color: '#fff', borderRadius: 5,
-                              padding: '1px 5px', fontSize: 10, fontWeight: 900,
-                              border: `2px solid ${isPopoverOpen ? '#60a5fa' : '#1e293b'}`,
-                              cursor: 'pointer' }}>
-                            ×{slot.groupIds.length}
-                          </div>
-                        )}
                       </div>
                     );
                   })}
@@ -1603,47 +1623,67 @@ function TableCanvas({
               {row.slots.map(slot => {
                 const card = myCardMap.get(slot.topId);
                 if (!card) return null;
-                const depth = slot.groupIds.length - 1;
-                const shadow = stackShadow(depth);
+                const stackN = slot.groupIds.length;
                 const isPopoverOpen = stackPopover?.groupIds[0] === slot.topId && stackPopover?.isMyCard;
                 return (
                   <div key={slot.topId} style={{ position: 'absolute', left: slot.x, top: rowBaseY + row.y, zIndex: 2 }}
                     onMouseDown={e => e.stopPropagation()}>
-                    <div style={{ boxShadow: shadow, borderRadius: 6 }}>
-                      <MyBattlefieldCard
-                        card={card} cardW={row.cW} cardH={row.cH}
-                        onTap={() => onTapCard(card.instanceId)}
-                        onGraveyard={() => onGraveyardCard(card.instanceId)}
-                        onExile={() => onExileCard(card.instanceId)}
-                        onReturnCommander={() => onReturnCmdCard(card.instanceId)}
-                        onReturnHand={() => onReturnHandCard(card.instanceId)}
-                        onGiveControl={(targetSocketId) => onGiveControl(card.instanceId, targetSocketId)}
-                        opponents={opponents.map((o) => ({ socketId: o.socketId, playerName: o.playerName }))}
-                        onDragStart={e => onDragStartCard(e, card.instanceId)}
-                        onHover={(c) => { onBfCardHover(c.instanceId); onHover(c); }}
-                        onHoverEnd={() => { onBfCardHover(null); onHoverEnd(); }}
-                        onUpdateCounter={(counter, delta) => onUpdateCounter(card.instanceId, counter, delta)}
-                        onSetPt={(power, toughness) => onSetPt(card.instanceId, power, toughness)}
-                        onSetKeywords={(kws) => onSetKeywords(card.instanceId, kws)}
-                      />
-                    </div>
-                    {/* Stack badge — click to expand popover */}
-                    {depth > 0 && (
-                      <div onClick={(e) => {
-                        e.stopPropagation();
-                        setStackPopover(isPopoverOpen ? null : {
-                          groupIds: slot.groupIds, isMyCard: true,
-                          canvasX: slot.x, canvasY: rowBaseY + row.y, cW: row.cW, cH: row.cH,
-                        });
-                      }}
-                        style={{ position: 'absolute', top: -7, left: -7, zIndex: 30,
-                          background: '#2563eb', color: '#fff', borderRadius: 5,
-                          padding: '1px 5px', fontSize: 10, fontWeight: 900,
-                          border: `2px solid ${isPopoverOpen ? '#60a5fa' : '#1e293b'}`,
-                          cursor: 'pointer' }}>
-                        ×{slot.groupIds.length}
+                    <div style={{ position: 'relative', width: row.cW, height: row.cH }}>
+                      {/* Ghost cards — same image, dimmed, offset behind */}
+                      {stackN > 1 && slot.groupIds.slice(1, 4).map((gid, gi) => {
+                        const gc = myCardMap.get(gid);
+                        return (
+                          <div key={gid} style={{
+                            position: 'absolute', top: (gi + 1) * 3, left: (gi + 1) * 3,
+                            width: row.cW, height: row.cH, borderRadius: 6, overflow: 'hidden',
+                            pointerEvents: 'none', zIndex: -(gi + 1),
+                          }}>
+                            {(gc ?? card).imageUri
+                              ? <img src={(gc ?? card).imageUri} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.55 }} alt="" />
+                              : <div style={{ width: '100%', height: '100%', background: '#1a2d40', border: '1px solid rgba(100,116,139,0.3)', borderRadius: 6 }} />
+                            }
+                          </div>
+                        );
+                      })}
+                      {/* Front card */}
+                      <div style={{ position: 'absolute', top: 0, left: 0 }}>
+                        <MyBattlefieldCard
+                          card={card} cardW={row.cW} cardH={row.cH}
+                          onTap={() => onTapCard(card.instanceId)}
+                          onGraveyard={() => onGraveyardCard(card.instanceId)}
+                          onExile={() => onExileCard(card.instanceId)}
+                          onReturnCommander={() => onReturnCmdCard(card.instanceId)}
+                          onReturnHand={() => onReturnHandCard(card.instanceId)}
+                          onGiveControl={(targetSocketId) => onGiveControl(card.instanceId, targetSocketId)}
+                          opponents={opponents.map((o) => ({ socketId: o.socketId, playerName: o.playerName }))}
+                          onDragStart={e => onDragStartCard(e, card.instanceId)}
+                          onHover={(c) => { onBfCardHover(c.instanceId); onHover(c); }}
+                          onHoverEnd={() => { onBfCardHover(null); onHoverEnd(); }}
+                          onUpdateCounter={(counter, delta) => onUpdateCounter(card.instanceId, counter, delta)}
+                          onSetPt={(power, toughness) => onSetPt(card.instanceId, power, toughness)}
+                          onSetKeywords={(kws) => onSetKeywords(card.instanceId, kws)}
+                        />
                       </div>
-                    )}
+                      {/* Stack badge — bottom-right, only for N > 1 */}
+                      {stackN > 1 && (
+                        <div onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setStackPopover(isPopoverOpen ? null : {
+                            groupIds: slot.groupIds, isMyCard: true,
+                            canvasX: slot.x, canvasY: rowBaseY + row.y, cW: row.cW, cH: row.cH,
+                          });
+                        }}
+                          style={{ position: 'absolute', bottom: 6, right: 6, zIndex: 30,
+                            background: isPopoverOpen ? '#1d4ed8' : 'rgba(37,99,235,0.92)',
+                            color: '#fff', borderRadius: 4, padding: '1px 5px', fontSize: 9,
+                            fontWeight: 900, border: '1px solid rgba(255,255,255,0.25)',
+                            cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.6)',
+                            userSelect: 'none' }}>
+                          ×{stackN}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -1750,73 +1790,82 @@ function TableCanvas({
           )}
 
           {/* ── Stack popover ── */}
-          {stackPopover && (
-            <div
-              style={{
-                position: 'absolute',
-                left: stackPopover.canvasX - 8,
-                top: stackPopover.isMyCard
-                  ? stackPopover.canvasY - stackPopover.cH - 20
-                  : stackPopover.canvasY + stackPopover.cH + 20,
-                zIndex: 300,
-                display: 'flex', flexDirection: 'row', gap: 6,
-                background: 'rgba(6,9,18,0.96)',
-                border: '1px solid rgba(100,116,139,0.45)',
-                borderRadius: 12, padding: 10,
-                boxShadow: '0 12px 48px rgba(0,0,0,0.9)',
-              }}
-              onMouseDown={e => e.stopPropagation()}
-            >
-              <button onClick={() => setStackPopover(null)}
-                style={{ position: 'absolute', top: -8, right: -8, zIndex: 10,
-                  background: '#1e293b', border: '1px solid #334155', color: '#94a3b8',
-                  borderRadius: '50%', width: 20, height: 20, fontSize: 11, cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
-              {stackPopover.isMyCard
-                ? stackPopover.groupIds.map(id => {
-                    const c = myCardMap.get(id);
-                    if (!c) return null;
-                    return (
-                      <div key={id} onMouseDown={e => e.stopPropagation()}>
-                        <MyBattlefieldCard
-                          card={c} cardW={stackPopover.cW} cardH={stackPopover.cH}
-                          onTap={() => { onTapCard(c.instanceId); }}
-                          onGraveyard={() => { onGraveyardCard(c.instanceId); setStackPopover(null); }}
-                          onExile={() => { onExileCard(c.instanceId); setStackPopover(null); }}
-                          onReturnCommander={() => { onReturnCmdCard(c.instanceId); setStackPopover(null); }}
-                          onReturnHand={() => { onReturnHandCard(c.instanceId); setStackPopover(null); }}
-                          onGiveControl={(tgt) => { onGiveControl(c.instanceId, tgt); setStackPopover(null); }}
-                          opponents={opponents.map(o => ({ socketId: o.socketId, playerName: o.playerName }))}
-                          onDragStart={e => { onDragStartCard(e, c.instanceId); setStackPopover(null); }}
-                          onHover={(hc) => { onBfCardHover(hc.instanceId); onHover(hc); }}
-                          onHoverEnd={() => { onBfCardHover(null); onHoverEnd(); }}
-                          onUpdateCounter={(counter, delta) => onUpdateCounter(c.instanceId, counter, delta)}
-                          onSetPt={(pw, tg) => onSetPt(c.instanceId, pw, tg)}
-                          onSetKeywords={kws => onSetKeywords(c.instanceId, kws)}
-                        />
-                      </div>
-                    );
-                  })
-                : stackPopover.groupIds.map(id => {
-                    const c = opponents.flatMap(p => p.battlefield as GameCard[]).find(bc => bc.instanceId === id);
-                    if (!c) return null;
-                    return (
-                      <div key={id} style={{ width: stackPopover.cW, height: stackPopover.cH, flexShrink: 0,
-                        borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.12)' }}
+          {stackPopover && (() => {
+            const THUMB_W = Math.round(stackPopover.cW * 0.72);
+            const THUMB_H = Math.round(stackPopover.cH * 0.72);
+            const popoverTop = stackPopover.isMyCard
+              ? stackPopover.canvasY - THUMB_H - 52
+              : stackPopover.canvasY + stackPopover.cH + 12;
+            return (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: stackPopover.canvasX,
+                  top: popoverTop,
+                  zIndex: 300,
+                  display: 'flex', flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+                  background: 'rgba(6,9,18,0.97)',
+                  border: '1px solid rgba(100,116,139,0.4)',
+                  borderRadius: 10, padding: 8,
+                  boxShadow: '0 12px 48px rgba(0,0,0,0.9)',
+                }}
+                onMouseDown={e => e.stopPropagation()}
+              >
+                <button onClick={() => setStackPopover(null)}
+                  style={{ position: 'absolute', top: -8, right: -8, zIndex: 10,
+                    background: '#1e293b', border: '1px solid #334155', color: '#94a3b8',
+                    borderRadius: '50%', width: 18, height: 18, fontSize: 10, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>✕</button>
+                {stackPopover.groupIds.map((id, idx) => {
+                  const c = stackPopover.isMyCard
+                    ? myCardMap.get(id)
+                    : opponents.flatMap(p => p.battlefield as GameCard[]).find(bc => bc.instanceId === id);
+                  if (!c) return null;
+                  return (
+                    <div key={id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      {/* Thumbnail */}
+                      <div style={{ width: THUMB_W, height: THUMB_H, borderRadius: 5, overflow: 'hidden',
+                        border: '1px solid rgba(255,255,255,0.14)', flexShrink: 0 }}
                         onMouseEnter={() => onHover(c)} onMouseLeave={onHoverEnd}>
                         {c.imageUri
                           ? <img src={c.imageUri} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={c.name} />
-                          : <div style={{ width: '100%', height: '100%', background: '#1f2937', display: 'flex',
-                              alignItems: 'center', justifyContent: 'center' }}>
-                              <span style={{ fontSize: 7, color: '#6b7280' }}>{c.name}</span>
+                          : <div style={{ width: '100%', height: '100%', background: '#1f2937',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <span style={{ fontSize: 6, color: '#6b7280' }}>{c.name.slice(0, 10)}</span>
                             </div>
                         }
                       </div>
-                    );
-                  })
-              }
-            </div>
-          )}
+                      {/* Copy number */}
+                      <span style={{ fontSize: 8, color: '#64748b', fontWeight: 600 }}>#{idx + 1}</span>
+                      {/* Actions — only for my own cards */}
+                      {stackPopover.isMyCard && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, width: '100%' }}>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onTapCard(c.instanceId); }}
+                            style={{ fontSize: 8, fontWeight: 700, padding: '2px 4px', borderRadius: 3, cursor: 'pointer',
+                              background: 'rgba(250,204,21,0.15)', border: '1px solid rgba(250,204,21,0.35)', color: '#fbbf24' }}>
+                            ↻ Tap
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onGraveyardCard(c.instanceId); setStackPopover(null); }}
+                            style={{ fontSize: 8, fontWeight: 700, padding: '2px 4px', borderRadius: 3, cursor: 'pointer',
+                              background: 'rgba(156,163,175,0.12)', border: '1px solid rgba(156,163,175,0.3)', color: '#9ca3af' }}>
+                            → GY
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onReturnHandCard(c.instanceId); setStackPopover(null); }}
+                            style={{ fontSize: 8, fontWeight: 700, padding: '2px 4px', borderRadius: 3, cursor: 'pointer',
+                              background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.3)', color: '#93c5fd' }}>
+                            → Hand
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {/* ── Graveyard + Exile drop zones ── */}
           <div style={{ position: 'absolute', bottom: 14, right: 14, display: 'flex', gap: 14, zIndex: 4 }}
