@@ -807,8 +807,18 @@ io.on('connection', (socket) => {
     const card = player.battlefield.find((c) => c.instanceId === instanceId);
     if (!card) return;
     if (!card.counters) card.counters = {};
-    card.counters[counter] = Math.max(0, (card.counters[counter] ?? 0) + delta);
-    if (card.counters[counter] === 0) delete card.counters[counter];
+
+    // MTG rules: +1/+1 and -1/-1 counters annihilate each other.
+    // When adding one, cancel the opposite instead if any exist.
+    const opposite: Record<string, string> = { '+1/+1': '-1/-1', '-1/-1': '+1/+1' };
+    if (delta > 0 && opposite[counter] && (card.counters[opposite[counter]] ?? 0) > 0) {
+      const opp = opposite[counter];
+      card.counters[opp] = (card.counters[opp] ?? 0) - 1;
+      if (card.counters[opp] === 0) delete card.counters[opp];
+    } else {
+      card.counters[counter] = Math.max(0, (card.counters[counter] ?? 0) + delta);
+      if (card.counters[counter] === 0) delete card.counters[counter];
+    }
 
     // Non-creature tokens at quantity 0 are consumed/sacrificed — remove from battlefield
     if (card.isToken && counter === 'quantity' && !(card.counters['quantity'])) {

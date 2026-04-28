@@ -797,8 +797,17 @@ function TokenCard({
         )}
 
         {isCreature ? (
-          /* Single P/T pill — the ONLY P/T display for creature tokens */
-          <div style={pillStyle}>{displayP}/{displayT}</div>
+          <>
+            {/* Counter badges — top-left, same style as regular creatures */}
+            {(plusOne > 0 || minusOne > 0) && (
+              <div style={{ position: 'absolute', top: 3, left: 3, display: 'flex', flexDirection: 'column', gap: 2, zIndex: 15, pointerEvents: 'none' }}>
+                {plusOne  > 0 && <CounterBadge type="+1/+1" count={plusOne}  />}
+                {minusOne > 0 && <CounterBadge type="-1/-1" count={minusOne} />}
+              </div>
+            )}
+            {/* Single live P/T pill at bottom */}
+            <div style={pillStyle}>{displayP}/{displayT}</div>
+          </>
         ) : (
           /* Non-creature token: quantity pill + +/- buttons revealed on hover */
           <>
