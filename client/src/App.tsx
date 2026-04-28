@@ -9,6 +9,7 @@ import DeckBuilderPage from './pages/DeckBuilderPage';
 import LobbyPage from './pages/LobbyPage';
 import GameRoomPage from './pages/GameRoomPage';
 import GameBoardPage from './pages/GameBoardPage';
+import PlaytestPage from './pages/PlaytestPage';
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="/lobby" element={<LobbyPage />} />
             <Route path="/room/:roomId" element={<GameRoomPage />} />
             <Route path="/game/:roomId" element={<GameBoardPage />} />
+            <Route path="/playtest/:deckId" element={<PlaytestPage />} />
           </Route>
 
           <Route path="/" element={<HomePage />} />

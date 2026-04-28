@@ -152,6 +152,7 @@ export default function ProfilePage() {
                 deleting={deletingId === deck.id}
                 onEdit={() => navigate(`/deck-builder/${deck.id}`)}
                 onDelete={() => deleteDeck(deck.id)}
+                onPlaytest={() => navigate(`/playtest/${deck.id}`)}
               />
             ))}
           </div>
@@ -162,12 +163,13 @@ export default function ProfilePage() {
 }
 
 function DeckCard({
-  deck, deleting, onEdit, onDelete,
+  deck, deleting, onEdit, onDelete, onPlaytest,
 }: {
   deck: Deck;
   deleting: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onPlaytest: () => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -217,6 +219,13 @@ function DeckCard({
         </div>
 
         <div className="flex gap-2 mt-auto">
+          <button
+            onClick={onPlaytest}
+            className="flex-1 text-sm font-semibold rounded-lg py-1.5 transition"
+            style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.4)', color: '#a5b4fc' }}
+          >
+            Playtest
+          </button>
           <button
             onClick={onEdit}
             className="flex-1 text-sm text-gray-200 hover:text-white border border-gray-700

@@ -664,7 +664,7 @@ function PtBar({ card }: { card: GameCard }) {
   const delta = pp - mm;
   const fmt = (base: string | null) => {
     if (base === null) return '?';
-    const n = parseInt(base, 10);
+    const n = base === '*' ? 0 : parseInt(base, 10);
     return isNaN(n) ? base : String(Math.max(0, n + delta));
   };
   return (
@@ -695,7 +695,7 @@ function TokenPtOverlay({ card }: { card: GameCard }) {
   const delta = pp - mm;
   const fmt = (base: string | null) => {
     if (base === null) return '?';
-    const n = parseInt(base, 10);
+    const n = base === '*' ? 0 : parseInt(base, 10);
     return isNaN(n) ? base : String(Math.max(0, n + delta));
   };
   return (
@@ -706,6 +706,23 @@ function TokenPtOverlay({ card }: { card: GameCard }) {
       fontSize: 16, fontWeight: 900, color: '#fff', letterSpacing: 0.5, whiteSpace: 'nowrap',
     }}>
       {fmt(basePow)}/{fmt(baseTou)}
+    </div>
+  );
+}
+
+function NonCreatureTokenOverlay({ card }: { card: GameCard }) {
+  if (!card.isToken) return null;
+  if ((card.typeLine ?? '').includes('Creature')) return null;
+  const total = Object.values(card.counters ?? {}).filter(n => n > 0).reduce((s, n) => s + n, 0);
+  if (total === 0) return null;
+  return (
+    <div style={{
+      position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+      zIndex: 20, pointerEvents: 'none',
+      background: 'rgba(0,0,0,0.82)', borderRadius: 12, padding: '4px 14px',
+      fontSize: 22, fontWeight: 900, color: '#fff', letterSpacing: 0.5, whiteSpace: 'nowrap',
+    }}>
+      {total}
     </div>
   );
 }
@@ -796,9 +813,10 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
         </div>
       )}
 
-      {/* P/T bar for real cards; live P/T overlay for tokens */}
+      {/* P/T bar for real cards; live overlays for tokens */}
       <PtBar card={card} />
       <TokenPtOverlay card={card} />
+      <NonCreatureTokenOverlay card={card} />
 
       {/* ⋮ button */}
       <button
@@ -1213,9 +1231,9 @@ function ZoneHeader({ player, color, isMonarch }: { player: PersonalPlayerState;
 
 function effectivePT(basePow: string | null, baseTou: string | null, counters: Record<string, number> = {}) {
   const delta = (counters['+1/+1'] ?? 0) - (counters['-1/-1'] ?? 0);
-  // Use explicit parseInt without || fallback to correctly handle 0-power / 0-toughness cards
-  const rawP = basePow !== null ? parseInt(basePow, 10) : 0;
-  const rawT = baseTou !== null ? parseInt(baseTou, 10) : 1;
+  // Treat '*' as 0 so counter-boosted star-P/T cards resolve correctly
+  const rawP = basePow === '*' ? 0 : basePow !== null ? parseInt(basePow, 10) : 0;
+  const rawT = baseTou === '*' ? 0 : baseTou !== null ? parseInt(baseTou, 10) : 1;
   return {
     power:     Math.max(0, (isNaN(rawP) ? 0 : rawP) + delta),
     toughness: Math.max(0, (isNaN(rawT) ? 1 : rawT) + delta),
@@ -2007,6 +2025,7 @@ function TableCanvas({
                             )}
                             <PtBar card={card} />
                             <TokenPtOverlay card={card} />
+                            <NonCreatureTokenOverlay card={card} />
                             {/* Attacker indicator from combatState */}
                             {combatState?.attacks.some(a => a.attackerId === slot.topId) && (
                               <div style={{ position: 'absolute', top: 2, left: 2, zIndex: 60,
