@@ -652,23 +652,23 @@ function CounterBadge({ type, count }: { type: string; count: number }) {
 
 // ── P/T bar ───────────────────────────────────────────────────────────────────
 
+function sanitizePT(val: string | null | undefined): number {
+  if (!val || val === '*' || val.includes('*')) return 1;
+  const n = parseInt(val, 10);
+  return isNaN(n) ? 1 : n;
+}
+
 function PtBar({ card }: { card: GameCard }) {
   // Hide for any token — detected by isToken flag OR 'Token' in type line (belt-and-suspenders)
   if (card.isToken || (card.typeLine ?? '').includes('Token')) return null;
   const isCreature = (card.typeLine ?? '').includes('Creature');
   if (!isCreature) return null;
-  const basePow = card.powerOverride ?? card.power ?? null;
-  const baseTou = card.toughnessOverride ?? card.toughness ?? null;
-  if (basePow === null && baseTou === null) return null;
-  const pp = card.counters?.['+1/+1'] ?? 0;
-  const mm = card.counters?.['-1/-1'] ?? 0;
-  const delta = pp - mm;
-  const fmt = (base: string | null) => {
-    if (base === null) return '?';
-    // '*' treated as 1 so Ashaya etc. show "1 + counters" rather than raw '*'
-    const n = base === '*' ? 1 : parseInt(base, 10);
-    return isNaN(n) ? base : String(n + delta);
-  };
+  if (!card.power && !card.toughness && !card.powerOverride && !card.toughnessOverride) return null;
+  const plusOne  = card.counters?.['+1/+1'] ?? 0;
+  const minusOne = card.counters?.['-1/-1'] ?? 0;
+  const delta = plusOne - minusOne;
+  const displayP = Math.max(0, sanitizePT(card.powerOverride ?? card.power) + delta);
+  const displayT = Math.max(0, sanitizePT(card.toughnessOverride ?? card.toughness) + delta);
   return (
     <div style={{
       position: 'absolute', bottom: 0, left: 0, right: 0, height: 22,
@@ -678,10 +678,10 @@ function PtBar({ card }: { card: GameCard }) {
       fontSize: 14, fontWeight: 800, color: '#f1f5f9',
     }}>
       <span style={{ fontSize: 11, lineHeight: 1 }}>⚔</span>
-      <span>{fmt(basePow)}</span>
+      <span>{displayP}</span>
       <span style={{ opacity: 0.35, fontSize: 12 }}>/</span>
       <span style={{ fontSize: 11, lineHeight: 1 }}>🛡</span>
-      <span>{fmt(baseTou)}</span>
+      <span>{displayT}</span>
     </div>
   );
 }
