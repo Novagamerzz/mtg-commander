@@ -3156,7 +3156,10 @@ export default function GameBoardPage() {
     castCommander: ()          => socket.emit('game:cast_commander'),
     tutor:        (id: string, to: 'hand' | 'battlefield') => socket.emit('game:tutor', { instanceId: id, to }),
     createToken:  (name: string, power: string, toughness: string, color: string, typeLine: string, oracleText = '') => {
-      const pt = (power || toughness) ? `${power}/${toughness}` : '';
+      // Creature tokens: omit P/T from the SVG — TokenCard renders the live pill as the sole display.
+      // Non-creature tokens have no P/T anyway; this keeps the SVG clean either way.
+      const isCreatureToken = typeLine.includes('Creature');
+      const pt = (!isCreatureToken && (power || toughness)) ? `${power}/${toughness}` : '';
       const imageUri = makeTokenImageUri(name, pt, color, oracleText);
       socket.emit('game:create_token', { name, power, toughness, color, typeLine, imageUri, oracleText });
     },
