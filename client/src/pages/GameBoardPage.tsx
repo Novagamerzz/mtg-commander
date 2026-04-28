@@ -3073,11 +3073,26 @@ export default function GameBoardPage() {
       if (k === 'h' || k === 'H') { socket.emit('game:move_to_hand', { instanceId: id }); setHoverCard(null); return; }
       if (k === 'c' || k === 'C') { socket.emit('game:copy_card', { instanceId: id }); return; }
       if (k === 'f' || k === 'F') { socket.emit('game:flip_card', { instanceId: id }); return; }
-      if (k === '+' || k === '=') { socket.emit('game:update_counter', { instanceId: id, counter: '+1/+1', delta: 1 }); return; }
+      if (k === '+' || k === '=') {
+        console.log('key pressed', e.key, 'card:', card?.name, 'isToken:', card?.isToken);
+        const isArtifactToken = card?.isToken && !(card.typeLine ?? '').includes('Creature');
+        socket.emit('game:update_counter', {
+          instanceId: id,
+          counter: isArtifactToken ? 'quantity' : '+1/+1',
+          delta: 1,
+        });
+        return;
+      }
       if (k === '-' || k === '_') {
-        console.log('minus key', id, card?.isToken, card?.typeLine);
-        // Add a -1/-1 counter (not remove +1/+1 — that silently no-ops when count is 0)
-        socket.emit('game:update_counter', { instanceId: id, counter: '-1/-1', delta: 1 });
+        console.log('key pressed', e.key, 'card:', card?.name, 'isToken:', card?.isToken);
+        const isArtifactToken = card?.isToken && !(card.typeLine ?? '').includes('Creature');
+        if (isArtifactToken) {
+          // quantity counter; server removes token from battlefield when it hits 0
+          socket.emit('game:update_counter', { instanceId: id, counter: 'quantity', delta: -1 });
+        } else {
+          // Add a -1/-1 counter on creatures (not remove +1/+1 — that silently no-ops when count is 0)
+          socket.emit('game:update_counter', { instanceId: id, counter: '-1/-1', delta: 1 });
+        }
         return;
       }
       if (k === 'Delete' || k === 'Backspace') {
