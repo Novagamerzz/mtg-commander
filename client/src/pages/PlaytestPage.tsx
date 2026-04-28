@@ -95,8 +95,9 @@ function PtestCard({
   const baseTou = card.toughness ?? null;
   const showPt = isCreature && (basePow !== null || baseTou !== null);
   const fmt = (b: string | null) => {
-    const n = b === '*' ? 1 : parseInt(b ?? '1', 10);
-    return isNaN(n) ? (b ?? '?') : String(Math.max(0, n + pp));
+    if (!b || b.includes('*')) return String(Math.max(0, 1 + pp));
+    const n = parseInt(b, 10);
+    return isNaN(n) ? '1' : String(Math.max(0, n + pp));
   };
 
   const nonCreatureCounterTotal = !isCreature

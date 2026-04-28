@@ -652,6 +652,11 @@ function CounterBadge({ type, count }: { type: string; count: number }) {
 
 // ── P/T bar ───────────────────────────────────────────────────────────────────
 
+function sanitizePT(val: string | null | undefined): string {
+  if (!val || val.includes('*')) return '1';
+  return val;
+}
+
 function PtBar({ card }: { card: GameCard }) {
   // Only render for non-token creatures
   if (card.isToken) return null;
@@ -668,8 +673,8 @@ function PtBar({ card }: { card: GameCard }) {
   const plusOne  = card.counters?.['+1/+1'] ?? 0;
   const minusOne = card.counters?.['-1/-1'] ?? 0;
   const delta = plusOne - minusOne;
-  const displayP = Math.max(0, parse(card.power) + delta);
-  const displayT = Math.max(0, parse(card.toughness) + delta);
+  const displayP = Math.max(0, parse(sanitizePT(card.power)) + delta);
+  const displayT = Math.max(0, parse(sanitizePT(card.toughness)) + delta);
 
   return (
     <div style={{
@@ -698,9 +703,8 @@ function TokenPtOverlay({ card }: { card: GameCard }) {
   const mm = card.counters?.['-1/-1'] ?? 0;
   const delta = pp - mm;
   const fmt = (base: string | null) => {
-    if (base === null) return '?';
-    const n = parseInt(base, 10);
-    return isNaN(n) ? base : String(n + delta);
+    const n = parseInt(sanitizePT(base), 10);
+    return isNaN(n) ? '1' : String(Math.max(0, n + delta));
   };
   return (
     <div style={{
