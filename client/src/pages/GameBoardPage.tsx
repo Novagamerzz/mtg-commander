@@ -653,7 +653,8 @@ function CounterBadge({ type, count }: { type: string; count: number }) {
 // ── P/T bar ───────────────────────────────────────────────────────────────────
 
 function PtBar({ card }: { card: GameCard }) {
-  if (card.isToken) return null;
+  // Hide for any token — detected by isToken flag OR 'Token' in type line (belt-and-suspenders)
+  if (card.isToken || (card.typeLine ?? '').includes('Token')) return null;
   const isCreature = (card.typeLine ?? '').includes('Creature');
   if (!isCreature) return null;
   const basePow = card.powerOverride ?? card.power ?? null;
@@ -664,7 +665,8 @@ function PtBar({ card }: { card: GameCard }) {
   const delta = pp - mm;
   const fmt = (base: string | null) => {
     if (base === null) return '?';
-    const n = base === '*' ? 0 : parseInt(base, 10);
+    const n = parseInt(base, 10);
+    // '*' → NaN → display as-is; only effectivePT() converts * to 0 for math
     return isNaN(n) ? base : String(Math.max(0, n + delta));
   };
   return (
@@ -695,7 +697,7 @@ function TokenPtOverlay({ card }: { card: GameCard }) {
   const delta = pp - mm;
   const fmt = (base: string | null) => {
     if (base === null) return '?';
-    const n = base === '*' ? 0 : parseInt(base, 10);
+    const n = parseInt(base, 10);
     return isNaN(n) ? base : String(Math.max(0, n + delta));
   };
   return (
@@ -711,18 +713,18 @@ function TokenPtOverlay({ card }: { card: GameCard }) {
 }
 
 function NonCreatureTokenOverlay({ card }: { card: GameCard }) {
-  if (!card.isToken) return null;
+  if (!card.isToken && !(card.typeLine ?? '').includes('Token')) return null;
   if ((card.typeLine ?? '').includes('Creature')) return null;
-  const total = Object.values(card.counters ?? {}).filter(n => n > 0).reduce((s, n) => s + n, 0);
-  if (total === 0) return null;
+  const qty = card.counters?.['quantity'] ?? 0;
+  if (qty === 0) return null;
   return (
     <div style={{
-      position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+      position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)',
       zIndex: 20, pointerEvents: 'none',
       background: 'rgba(0,0,0,0.82)', borderRadius: 12, padding: '4px 14px',
       fontSize: 22, fontWeight: 900, color: '#fff', letterSpacing: 0.5, whiteSpace: 'nowrap',
     }}>
-      {total}
+      {qty}
     </div>
   );
 }
@@ -894,6 +896,31 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
                     </button>
                   ))}
                 </div>
+
+                {/* Non-creature token quantity control */}
+                {card.isToken && !(card.typeLine ?? '').includes('Creature') && (
+                  <div style={{ padding: '6px 0', borderBottom: '1px solid #1e293b' }}>
+                    <p style={{ fontSize: 11, color: '#64748b', padding: '6px 18px 6px',
+                      fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>Quantity</p>
+                    {(() => {
+                      const qty = counters['quantity'] ?? 0;
+                      const btnStyle: React.CSSProperties = {
+                        width: 28, height: 28, borderRadius: 7, background: '#1e293b',
+                        border: '1px solid #334155', color: '#cbd5e1', fontSize: 18,
+                        lineHeight: 1, cursor: 'pointer', flexShrink: 0, display: 'flex',
+                        alignItems: 'center', justifyContent: 'center',
+                      };
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', padding: '5px 12px 5px 18px', gap: 10 }}>
+                          <span style={{ fontSize: 14, color: '#e2e8f0', fontWeight: 700, flex: 1 }}>Qty</span>
+                          <button onClick={() => onUpdateCounter('quantity', -1)} style={btnStyle}>−</button>
+                          <span style={{ fontSize: 15, fontWeight: 800, color: '#f1f5f9', minWidth: 26, textAlign: 'center' }}>{qty}</span>
+                          <button onClick={() => onUpdateCounter('quantity', 1)} style={btnStyle}>+</button>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
 
                 {/* Counters */}
                 <div style={{ padding: '6px 0' }}>

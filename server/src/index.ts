@@ -807,6 +807,15 @@ io.on('connection', (socket) => {
     if (!card.counters) card.counters = {};
     card.counters[counter] = Math.max(0, (card.counters[counter] ?? 0) + delta);
     if (card.counters[counter] === 0) delete card.counters[counter];
+
+    // Non-creature tokens at quantity 0 are consumed/sacrificed — remove from battlefield
+    if (card.isToken && counter === 'quantity' && !(card.counters['quantity'])) {
+      player.battlefield = player.battlefield.filter(c => c.instanceId !== instanceId);
+      appendLog(game, `${player.playerName}: ${card.name} token used (removed)`);
+      broadcastGame(game);
+      return;
+    }
+
     if (delta !== 0) {
       appendLog(game, `${player.playerName}: ${card.name} ${delta > 0 ? '+' : ''}${delta} ${counter} counter`);
       io.to(game.roomId).emit('cardCounterUpdate', {
@@ -889,6 +898,8 @@ io.on('connection', (socket) => {
       power: power || undefined,
       toughness: toughness || undefined,
       isToken: true,
+      // Non-creature tokens start with quantity:1 so the overlay shows immediately
+      counters: (power || toughness) ? {} : { quantity: 1 },
     };
     player.battlefield.push(token);
     const ptStr = power && toughness ? ` (${power}/${toughness})` : '';
