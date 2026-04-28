@@ -35,6 +35,8 @@ export interface GameCard {
   powerOverride?: string | null;
   toughnessOverride?: string | null;
   isToken?: boolean;
+  basePower?: number;
+  baseToughness?: number;
 }
 
 export interface DeckCardData {

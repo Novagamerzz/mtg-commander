@@ -37,6 +37,8 @@ interface InternalCard {
   toughnessOverride?: string | null;
   isCommander?: boolean;
   isToken?: boolean;
+  basePower?: number;
+  baseToughness?: number;
   keywords?: string[];
 }
 
@@ -898,6 +900,8 @@ io.on('connection', (socket) => {
       power: power || undefined,
       toughness: toughness || undefined,
       isToken: true,
+      basePower:     (() => { const n = parseInt(power,    10); return isNaN(n) ? 0 : n; })(),
+      baseToughness: (() => { const n = parseInt(toughness, 10); return isNaN(n) ? 1 : n; })(),
       // Non-creature tokens start with quantity:1 so the overlay shows immediately
       counters: (power || toughness) ? {} : { quantity: 1 },
     };

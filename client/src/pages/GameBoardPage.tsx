@@ -729,6 +729,150 @@ function NonCreatureTokenOverlay({ card }: { card: GameCard }) {
   );
 }
 
+// ── Token card — isolated rendering path for all isToken === true cards ────────
+
+function TokenCard({
+  card, cardW, cardH,
+  onTap, onDragStart, onHover, onHoverEnd,
+  onUpdateCounter, onGraveyard, onExile, onReturnHand,
+}: {
+  card: GameCard; cardW: number; cardH: number;
+  onTap: () => void;
+  onDragStart: (e: React.DragEvent) => void;
+  onHover: (c: GameCard) => void; onHoverEnd: () => void;
+  onUpdateCounter: (counter: string, delta: number) => void;
+  onGraveyard: () => void; onExile: () => void; onReturnHand: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const isCreature = (card.typeLine ?? '').includes('Creature');
+  const counters   = card.counters ?? {};
+
+  const plusOne  = counters['+1/+1'] ?? 0;
+  const minusOne = counters['-1/-1'] ?? 0;
+  const delta    = plusOne - minusOne;
+
+  // basePower/baseToughness stored by server at creation; fall back to parsing power/toughness strings
+  const basePow = card.basePower ?? (parseInt(card.power ?? '0', 10) || 0);
+  const baseTou = card.baseToughness ?? (parseInt(card.toughness ?? '1', 10) || 1);
+  const displayP = Math.max(0, basePow + delta);
+  const displayT = Math.max(0, baseTou + delta);
+
+  const qty = counters['quantity'] ?? 1;
+
+  const pillStyle: React.CSSProperties = {
+    position: 'absolute', bottom: 6, left: '50%', transform: 'translateX(-50%)',
+    background: 'rgba(0,0,0,0.88)', borderRadius: 10, padding: '3px 12px',
+    fontSize: 17, fontWeight: 900, color: '#fff', whiteSpace: 'nowrap',
+    zIndex: 10, pointerEvents: 'none', letterSpacing: 0.5,
+  };
+
+  return (
+    <TappedCardWrapper card={card} cardW={cardW} cardH={cardH} className="group">
+      {/* Card face — click taps, right-click opens menu */}
+      <div
+        draggable
+        onDragStart={onDragStart}
+        onClick={onTap}
+        onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setMenuOpen(true); onHoverEnd(); }}
+        onMouseEnter={() => onHover(card)}
+        onMouseLeave={onHoverEnd}
+        className="w-full h-full relative"
+        style={{
+          cursor: card.tapped ? 'pointer' : 'grab',
+          borderRadius: 8, overflow: 'hidden',
+          border: card.tapped ? '2px solid rgba(250,204,21,0.6)' : '1px solid rgba(255,255,255,0.15)',
+          boxShadow: card.tapped ? '0 0 12px rgba(250,204,21,0.4)' : '0 4px 12px rgba(0,0,0,0.7)',
+        }}
+      >
+        {card.imageUri ? (
+          <img src={card.imageUri} alt={card.name}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: card.tapped ? 0.8 : 1 }} />
+        ) : (
+          <div style={{ width: '100%', height: '100%', background: '#1e293b', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 4 }}>
+            <span style={{ fontSize: 9, color: '#6b7280', textAlign: 'center' }}>{card.name}</span>
+          </div>
+        )}
+
+        {isCreature ? (
+          /* Single P/T pill — the ONLY P/T display for creature tokens */
+          <div style={pillStyle}>{displayP}/{displayT}</div>
+        ) : (
+          /* Non-creature token: quantity pill + +/- buttons revealed on hover */
+          <>
+            {qty > 0 && <div style={pillStyle}>{qty}</div>}
+            <div
+              className="absolute inset-x-0 bottom-0 opacity-0 group-hover:opacity-100 transition-opacity z-20"
+              style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center',
+                paddingBottom: 4, paddingTop: 24,
+                background: 'linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%)' }}
+            >
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  // decrement; server removes card when quantity hits 0
+                  onUpdateCounter('quantity', -1);
+                }}
+                style={{ width: 22, height: 22, borderRadius: '50%', background: '#7f1d1d',
+                  border: '1px solid #ef4444', color: '#fff', fontSize: 16, fontWeight: 900,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                −
+              </button>
+              <button
+                onClick={e => { e.stopPropagation(); onUpdateCounter('quantity', 1); }}
+                style={{ width: 22, height: 22, borderRadius: '50%', background: '#14532d',
+                  border: '1px solid #4ade80', color: '#fff', fontSize: 16, fontWeight: 900,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                +
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ⋮ menu button */}
+      <button
+        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold opacity-0 group-hover:opacity-100 transition z-20"
+        style={{ background: '#374151', border: '1px solid #4b5563', color: '#d1d5db' }}
+        onClick={e => { e.stopPropagation(); setMenuOpen(true); }}>⋮</button>
+
+      {/* Context menu portal */}
+      {menuOpen && ReactDOM.createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.75)',
+          backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onMouseDown={() => setMenuOpen(false)}>
+          <div style={{ width: 260, background: '#0f172a', border: '1px solid #334155',
+            borderRadius: 16, overflow: 'hidden', boxShadow: '0 32px 64px rgba(0,0,0,0.95)' }}
+            onMouseDown={e => e.stopPropagation()}>
+            <div style={{ padding: '12px 18px', borderBottom: '1px solid #1e293b' }}>
+              <span style={{ fontSize: 15, color: '#f1f5f9', fontWeight: 700 }}>{card.name}</span>
+            </div>
+            {([
+              { label: card.tapped ? '↺ Untap' : '↻ Tap', action: () => { onTap(); setMenuOpen(false); }, color: '#f1f5f9' },
+              { label: '✋ Return to Hand',      action: () => { onReturnHand(); setMenuOpen(false); }, color: '#86efac' },
+              { label: '🪦 Send to Graveyard', action: () => { onGraveyard();  setMenuOpen(false); }, color: '#94a3b8' },
+              { label: '↗ Exile',              action: () => { onExile();      setMenuOpen(false); }, color: '#c4b5fd' },
+              ...(isCreature ? [
+                { label: '+1/+1 Counter',  action: () => { onUpdateCounter('+1/+1',  1); setMenuOpen(false); }, color: '#4ade80' },
+                ...(plusOne > 0 ? [{ label: '− +1/+1 Counter', action: () => { onUpdateCounter('+1/+1', -1); setMenuOpen(false); }, color: '#f87171' }] : []),
+              ] : []),
+            ] as { label: string; action: () => void; color: string }[]).map(({ label, action, color }) => (
+              <button key={label} onClick={action}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 18px',
+                  fontSize: 13, fontWeight: 500, color, background: 'none', border: 'none', cursor: 'pointer' }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )}
+    </TappedCardWrapper>
+  );
+}
+
 // ── My battlefield card ───────────────────────────────────────────────────────
 
 function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommander, onReturnHand,
@@ -746,6 +890,7 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
   onSetKeywords: (keywords: string[]) => void;
   cardW?: number; cardH?: number;
 }) {
+  // Hooks must be called unconditionally before any early return (React rules)
   const [menuMode, setMenuMode] = useState<null | 'main' | 'giveControl'>(null);
 
   useEffect(() => {
@@ -757,6 +902,20 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
 
   const counters = card.counters ?? {};
   const hasCounters = Object.values(counters).some((n) => n > 0);
+
+  // ── Token branch — delegate to isolated TokenCard; hooks already called above ──
+  if (card.isToken) {
+    return (
+      <TokenCard
+        card={card} cardW={cardW} cardH={cardH}
+        onTap={onTap}
+        onDragStart={onDragStart}
+        onHover={onHover} onHoverEnd={onHoverEnd}
+        onUpdateCounter={onUpdateCounter}
+        onGraveyard={onGraveyard} onExile={onExile} onReturnHand={onReturnHand}
+      />
+    );
+  }
 
   function openMenu() { setMenuMode('main'); onHoverEnd(); }
   function closeMenu() { setMenuMode(null); }
@@ -815,10 +974,8 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
         </div>
       )}
 
-      {/* P/T bar for real cards; live overlays for tokens */}
+      {/* P/T bar for real (non-token) cards only */}
       <PtBar card={card} />
-      <TokenPtOverlay card={card} />
-      <NonCreatureTokenOverlay card={card} />
 
       {/* ⋮ button */}
       <button
