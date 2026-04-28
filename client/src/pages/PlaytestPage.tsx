@@ -95,7 +95,7 @@ function PtestCard({
   const baseTou = card.toughness ?? null;
   const showPt = isCreature && (basePow !== null || baseTou !== null);
   const fmt = (b: string | null) => {
-    const n = b === '*' ? 0 : parseInt(b ?? '0', 10);
+    const n = b === '*' ? 1 : parseInt(b ?? '1', 10);
     return isNaN(n) ? (b ?? '?') : String(Math.max(0, n + pp));
   };
 

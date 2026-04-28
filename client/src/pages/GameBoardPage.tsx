@@ -665,9 +665,8 @@ function PtBar({ card }: { card: GameCard }) {
   const delta = pp - mm;
   const fmt = (base: string | null) => {
     if (base === null) return '?';
-    const n = parseInt(base, 10);
-    // '*' → NaN → display as-is; only effectivePT() converts * to 0 for math
-    // No floor: creature dies server-side when toughness ≤ 0; show actual value until then
+    // '*' treated as 1 so Ashaya etc. show "1 + counters" rather than raw '*'
+    const n = base === '*' ? 1 : parseInt(base, 10);
     return isNaN(n) ? base : String(n + delta);
   };
   return (
@@ -1428,9 +1427,9 @@ function ZoneHeader({ player, color, isMonarch }: { player: PersonalPlayerState;
 
 function effectivePT(basePow: string | null, baseTou: string | null, counters: Record<string, number> = {}) {
   const delta = (counters['+1/+1'] ?? 0) - (counters['-1/-1'] ?? 0);
-  // Treat '*' as 0 so counter-boosted star-P/T cards resolve correctly
-  const rawP = basePow === '*' ? 0 : basePow !== null ? parseInt(basePow, 10) : 0;
-  const rawT = baseTou === '*' ? 0 : baseTou !== null ? parseInt(baseTou, 10) : 1;
+  // Treat '*' as 1: star creatures enter as 1/1 and grow via counters
+  const rawP = basePow === '*' ? 1 : basePow !== null ? parseInt(basePow, 10) : 0;
+  const rawT = baseTou === '*' ? 1 : baseTou !== null ? parseInt(baseTou, 10) : 1;
   return {
     power:     Math.max(0, (isNaN(rawP) ? 0 : rawP) + delta),
     toughness: Math.max(0, (isNaN(rawT) ? 1 : rawT) + delta),

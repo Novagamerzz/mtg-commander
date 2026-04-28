@@ -616,6 +616,12 @@ io.on('connection', (socket) => {
     const played = moveCard(player.hand, player.battlefield, instanceId);
     if (!played) return;
 
+    // * P/T creatures must enter as 1/1 so they survive the toughness death check
+    if (played.power === '*' || played.toughness === '*') {
+      if (played.basePower    === undefined) played.basePower    = 1;
+      if (played.baseToughness === undefined) played.baseToughness = 1;
+    }
+
     if (played.typeLine.includes('Land')) {
       player.landsPlayedThisTurn++;
     }
@@ -786,7 +792,15 @@ io.on('connection', (socket) => {
     if (!player) return;
     for (const zone of [player.graveyard, player.exile]) {
       const card = moveCard(zone, player.battlefield, instanceId);
-      if (card) { appendLog(game, `${player.playerName}: ${card.name} → battlefield`); broadcastGame(game); return; }
+      if (card) {
+        if (card.power === '*' || card.toughness === '*') {
+          if (card.basePower    === undefined) card.basePower    = 1;
+          if (card.baseToughness === undefined) card.baseToughness = 1;
+        }
+        appendLog(game, `${player.playerName}: ${card.name} → battlefield`);
+        broadcastGame(game);
+        return;
+      }
     }
   });
 
@@ -832,7 +846,9 @@ io.on('connection', (socket) => {
     const isCreature = (card.typeLine ?? '').includes('Creature');
     if (isCreature && (counter === '+1/+1' || counter === '-1/-1')) {
       const baseTouStr = card.toughnessOverride ?? card.toughness ?? '0';
-      const baseTou = card.baseToughness ?? (parseInt(baseTouStr, 10) || 0);
+      const parsedTou = parseInt(baseTouStr, 10);
+      // * toughness treated as 1 (same as ETB default) when baseToughness not explicitly set
+      const baseTou = card.baseToughness ?? (baseTouStr === '*' ? 1 : (isNaN(parsedTou) ? 1 : parsedTou));
       const effectiveTou = baseTou + (card.counters?.['+1/+1'] ?? 0) - (card.counters?.['-1/-1'] ?? 0);
       if (effectiveTou <= 0) {
         player.battlefield = player.battlefield.filter(c => c.instanceId !== instanceId);
