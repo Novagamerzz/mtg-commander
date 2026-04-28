@@ -818,6 +818,22 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // Creature death — check after every counter change that can affect P/T
+    const isCreature = (card.typeLine ?? '').includes('Creature');
+    if (isCreature && (counter === '+1/+1' || counter === '-1/-1')) {
+      const baseTouStr = card.toughnessOverride ?? card.toughness ?? '0';
+      const baseTou = card.baseToughness ?? (parseInt(baseTouStr, 10) || 0);
+      const effectiveTou = baseTou + (card.counters?.['+1/+1'] ?? 0) - (card.counters?.['-1/-1'] ?? 0);
+      if (effectiveTou <= 0) {
+        player.battlefield = player.battlefield.filter(c => c.instanceId !== instanceId);
+        player.graveyard.push({ ...card, tapped: false });
+        appendLog(game, `${player.playerName}: ${card.name} died (toughness reached 0)`);
+        io.to(game.roomId).emit('game:announcement', { message: `${card.name} died — toughness reached 0`, type: 'info' });
+        broadcastGame(game);
+        return;
+      }
+    }
+
     if (delta !== 0) {
       appendLog(game, `${player.playerName}: ${card.name} ${delta > 0 ? '+' : ''}${delta} ${counter} counter`);
       io.to(game.roomId).emit('cardCounterUpdate', {

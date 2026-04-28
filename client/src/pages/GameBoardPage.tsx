@@ -667,7 +667,8 @@ function PtBar({ card }: { card: GameCard }) {
     if (base === null) return '?';
     const n = parseInt(base, 10);
     // '*' → NaN → display as-is; only effectivePT() converts * to 0 for math
-    return isNaN(n) ? base : String(Math.max(0, n + delta));
+    // No floor: creature dies server-side when toughness ≤ 0; show actual value until then
+    return isNaN(n) ? base : String(n + delta);
   };
   return (
     <div style={{
@@ -698,7 +699,7 @@ function TokenPtOverlay({ card }: { card: GameCard }) {
   const fmt = (base: string | null) => {
     if (base === null) return '?';
     const n = parseInt(base, 10);
-    return isNaN(n) ? base : String(Math.max(0, n + delta));
+    return isNaN(n) ? base : String(n + delta);
   };
   return (
     <div style={{
@@ -755,8 +756,9 @@ function TokenCard({
   // basePower/baseToughness stored by server at creation; fall back to parsing power/toughness strings
   const basePow = card.basePower ?? (parseInt(card.power ?? '0', 10) || 0);
   const baseTou = card.baseToughness ?? (parseInt(card.toughness ?? '1', 10) || 1);
-  const displayP = Math.max(0, basePow + delta);
-  const displayT = Math.max(0, baseTou + delta);
+  // No floor — creature dies server-side when toughness ≤ 0; show actual value until then
+  const displayP = basePow + delta;
+  const displayT = baseTou + delta;
 
   const qty = counters['quantity'] ?? 1;
 
@@ -853,8 +855,10 @@ function TokenCard({
               { label: '🪦 Send to Graveyard', action: () => { onGraveyard();  setMenuOpen(false); }, color: '#94a3b8' },
               { label: '↗ Exile',              action: () => { onExile();      setMenuOpen(false); }, color: '#c4b5fd' },
               ...(isCreature ? [
-                { label: '+1/+1 Counter',  action: () => { onUpdateCounter('+1/+1',  1); setMenuOpen(false); }, color: '#4ade80' },
-                ...(plusOne > 0 ? [{ label: '− +1/+1 Counter', action: () => { onUpdateCounter('+1/+1', -1); setMenuOpen(false); }, color: '#f87171' }] : []),
+                { label: '+ +1/+1 Counter', action: () => { onUpdateCounter('+1/+1',  1); setMenuOpen(false); }, color: '#4ade80' },
+                { label: '+ -1/-1 Counter', action: () => { onUpdateCounter('-1/-1',  1); setMenuOpen(false); }, color: '#f87171' },
+                ...(plusOne > 0  ? [{ label: '− +1/+1 Counter', action: () => { onUpdateCounter('+1/+1', -1); setMenuOpen(false); }, color: '#94a3b8' }] : []),
+                ...(minusOne > 0 ? [{ label: '− -1/-1 Counter', action: () => { onUpdateCounter('-1/-1', -1); setMenuOpen(false); }, color: '#94a3b8' }] : []),
               ] : []),
             ] as { label: string; action: () => void; color: string }[]).map(({ label, action, color }) => (
               <button key={label} onClick={action}
