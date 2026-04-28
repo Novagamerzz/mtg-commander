@@ -1002,10 +1002,17 @@ function buildCRows(cards: GameCard[], rowDefs: typeof TYPE_ROWS = TYPE_ROWS, zo
     const nameMap = new Map<string, GameCard[]>();
     for (const c of rc) {
       // noStack (during declare_attackers): every card is its own slot so each can be targeted
-      // otherwise: group by name + counters + keywords so modified copies don't merge into stacks
+      // otherwise: group by name + counters + keywords so modified copies don't merge into stacks.
+      // Use a canonical counter key (sorted, zero-values dropped) so that {"+1/+1":0} and {}
+      // produce the same key — avoiding phantom split stacks after a counter is removed.
+      const countersKey = Object.entries(c.counters ?? {})
+        .filter(([, n]) => n > 0)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, n]) => `${k}:${n}`)
+        .join(',');
       const key = noStack
         ? c.instanceId
-        : `${c.name}__${JSON.stringify(c.counters ?? {})}__${(c.keywords ?? []).slice().sort().join(',')}`;
+        : `${c.name}__${countersKey}__${(c.keywords ?? []).slice().sort().join(',')}`;
       const arr = nameMap.get(key) ?? [];
       arr.push(c);
       nameMap.set(key, arr);
