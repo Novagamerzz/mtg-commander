@@ -663,18 +663,15 @@ function PtBar({ card }: { card: GameCard }) {
   const typeLine = card.typeLine ?? '';
   if (!typeLine.includes('Creature')) return null;
 
-  // Sanitize * and non-numeric values to 1
-  function parse(val: string | null | undefined): number {
-    if (!val || val.trim() === '' || val.includes('*')) return 1;
+  function fmt(val: string | null | undefined, counters = 0): number {
+    if (!val || val.includes('*')) return Math.max(0, 1 + counters);
     const n = parseInt(val, 10);
-    return isNaN(n) ? 1 : n;
+    return Math.max(0, (isNaN(n) ? 1 : n) + counters);
   }
 
   const plusOne  = card.counters?.['+1/+1'] ?? 0;
   const minusOne = card.counters?.['-1/-1'] ?? 0;
   const delta = plusOne - minusOne;
-  const displayP = Math.max(0, parse(sanitizePT(card.power)) + delta);
-  const displayT = Math.max(0, parse(sanitizePT(card.toughness)) + delta);
 
   console.log('PtBar rendering for', card.name, card.power);
 
@@ -687,10 +684,10 @@ function PtBar({ card }: { card: GameCard }) {
       fontSize: 14, fontWeight: 800, color: '#f1f5f9',
     }}>
       <span style={{ fontSize: 11 }}>⚔</span>
-      <span>{displayP}</span>
+      <span>{fmt(card.power, delta)}</span>
       <span style={{ opacity: 0.35, fontSize: 12 }}>/</span>
       <span style={{ fontSize: 11 }}>🛡</span>
-      <span>{displayT}</span>
+      <span>{fmt(card.toughness, delta)}</span>
     </div>
   );
 }
