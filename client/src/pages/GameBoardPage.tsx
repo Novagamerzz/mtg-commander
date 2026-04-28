@@ -3040,6 +3040,17 @@ export default function GameBoardPage() {
     }
   }, [gameState]);
 
+  // Clear hover popup when the hovered card is no longer present on any battlefield
+  useEffect(() => {
+    if (!hoverCard || !gameState) return;
+    const allBattlefieldCards = gameState.players.flatMap(p => p.battlefield);
+    const stillPresent = allBattlefieldCards.some(c => c.instanceId === hoverCard.instanceId);
+    if (!stillPresent) {
+      setHoverCard(null);
+      hoverBfCardId.current = null;
+    }
+  }, [gameState]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Clear combat selection when leaving combat sub-steps
   useEffect(() => {
     const phase = gameState?.phase;
