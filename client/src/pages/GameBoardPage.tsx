@@ -3065,7 +3065,12 @@ export default function GameBoardPage() {
       if (k === 'c' || k === 'C') { socket.emit('game:copy_card', { instanceId: id }); return; }
       if (k === 'f' || k === 'F') { socket.emit('game:flip_card', { instanceId: id }); return; }
       if (k === '+' || k === '=') { socket.emit('game:update_counter', { instanceId: id, counter: '+1/+1', delta: 1 }); return; }
-      if (k === '-' || k === '_') { socket.emit('game:update_counter', { instanceId: id, counter: '+1/+1', delta: -1 }); return; }
+      if (k === '-' || k === '_') {
+        console.log('minus key', id, card?.isToken, card?.typeLine);
+        // Add a -1/-1 counter (not remove +1/+1 — that silently no-ops when count is 0)
+        socket.emit('game:update_counter', { instanceId: id, counter: '-1/-1', delta: 1 });
+        return;
+      }
       if (k === 'Delete' || k === 'Backspace') {
         e.preventDefault();
         if (isCmd) setCommanderPopup({ cardName: card!.name, instanceId: id, destination: 'graveyard' });
