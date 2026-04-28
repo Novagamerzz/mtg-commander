@@ -676,12 +676,14 @@ function PtBar({ card }: { card: GameCard }) {
   const displayP = Math.max(0, parse(sanitizePT(card.power)) + delta);
   const displayT = Math.max(0, parse(sanitizePT(card.toughness)) + delta);
 
+  console.log('PtBar rendering for', card.name, card.power);
+
   return (
     <div style={{
-      position: 'absolute', bottom: 0, left: 0, right: 0, height: 22,
-      background: 'rgba(0,0,0,0.86)', borderRadius: '0 0 6px 6px',
+      position: 'absolute', bottom: 0, left: 0, right: 0, height: 28,
+      background: 'rgba(0,0,0,0.95)', borderRadius: '0 0 6px 6px',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      gap: 2, zIndex: 20, pointerEvents: 'none',
+      gap: 2, zIndex: 25, pointerEvents: 'none',
       fontSize: 14, fontWeight: 800, color: '#f1f5f9',
     }}>
       <span style={{ fontSize: 11 }}>⚔</span>
