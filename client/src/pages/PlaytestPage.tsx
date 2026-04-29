@@ -1097,6 +1097,7 @@ export default function PlaytestPage() {
   const [manaFromCard, setManaFromCard] = useState<Record<string, ManaPoolState>>({});
   const [diceResult, setDiceResult] = useState<string | null>(null);
   const [hoverCard, setHoverCard]   = useState<{ card: GameCard; x: number; y: number } | null>(null);
+  const mousePos = useRef({ x: 0, y: 0 });
 
   const [viewGy, setViewGy]         = useState(false);
   const [viewEx, setViewEx]         = useState(false);
@@ -1281,7 +1282,10 @@ export default function PlaytestPage() {
 
   return (
     <div style={{ height:'100vh', display:'flex', flexDirection:'column', background:'#030712', color:'#f1f5f9', overflow:'hidden', fontFamily:'system-ui, sans-serif' }}
-      onMouseMove={e => hoverCard && setHoverCard(h => h ? { ...h, x:e.clientX, y:e.clientY } : null)}>
+      onMouseMove={e => {
+        mousePos.current = { x: e.clientX, y: e.clientY };
+        if (hoverCard) setHoverCard(h => h ? { ...h, x: e.clientX, y: e.clientY } : null);
+      }}>
 
       {/* ── Header ── */}
       <div style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 10px', flexShrink:0,
@@ -1348,7 +1352,7 @@ export default function PlaytestPage() {
           onPlayFromHand={handlePlayFromHand}
           onOpenGy={() => setViewGy(true)}
           onOpenEx={() => setViewEx(true)}
-          onHover={(card) => setHoverCard({ card, x: 0, y: 0 })}
+          onHover={(card) => setHoverCard({ card, x: mousePos.current.x, y: mousePos.current.y })}
           onHoverEnd={() => setHoverCard(null)}
         />
       </div>
@@ -1385,7 +1389,7 @@ export default function PlaytestPage() {
       <ManaPoolTracker pool={manaPool} onAdjust={handleManaAdjust} />
 
       {/* Hover preview */}
-      {hoverCard && hoverCard.x > 0 && <HoverPreview card={hoverCard.card} x={hoverCard.x} y={hoverCard.y} />}
+      {hoverCard && <HoverPreview card={hoverCard.card} x={hoverCard.x} y={hoverCard.y} />}
 
       {/* Zone viewers */}
       {viewGy && (

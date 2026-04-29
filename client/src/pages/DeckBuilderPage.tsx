@@ -160,6 +160,71 @@ function DeckCardRow({
   );
 }
 
+function DeckGridCard({ entry, isCommander, onRemove, onHover, onHoverEnd }: {
+  entry: DeckEntry;
+  isCommander: boolean;
+  onRemove: () => void;
+  onHover: (uri: string) => void;
+  onHoverEnd: () => void;
+}) {
+  const CARD_W = 130, CARD_H = 182;
+  return (
+    <div className="group relative flex flex-col gap-1.5" style={{ width: CARD_W }}>
+      <div
+        className="relative rounded-xl overflow-hidden shrink-0"
+        style={{
+          width: CARD_W, height: CARD_H,
+          border: isCommander ? '2px solid #ca8a04' : '1px solid rgba(255,255,255,0.1)',
+          boxShadow: isCommander ? '0 0 12px rgba(202,138,4,0.35)' : '0 2px 8px rgba(0,0,0,0.6)',
+          cursor: 'default',
+        }}
+        onMouseEnter={() => entry.imageUri && onHover(entry.imageUri)}
+        onMouseLeave={onHoverEnd}
+      >
+        {entry.imageUri ? (
+          <img src={entry.imageUri} alt={entry.cardName}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center p-2"
+            style={{ background: '#1e293b' }}>
+            <span className="text-xs text-center text-gray-500">{entry.cardName}</span>
+          </div>
+        )}
+
+        {/* Quantity badge */}
+        {!isCommander && entry.quantity > 1 && (
+          <div style={{
+            position: 'absolute', top: 4, right: 4,
+            background: 'rgba(0,0,0,0.88)', color: '#f1f5f9',
+            borderRadius: 6, padding: '1px 6px', fontSize: 11, fontWeight: 900,
+            border: '1px solid rgba(255,255,255,0.2)',
+          }}>×{entry.quantity}</div>
+        )}
+
+        {/* Commander crown */}
+        {isCommander && (
+          <div style={{
+            position: 'absolute', top: 4, left: 4,
+            background: 'rgba(0,0,0,0.85)', color: '#ca8a04',
+            borderRadius: 6, padding: '1px 6px', fontSize: 11, fontWeight: 800,
+          }}>⚜</div>
+        )}
+
+        {/* Remove button on hover */}
+        <button
+          onClick={onRemove}
+          className="absolute top-1 right-1 w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition z-10"
+          style={{ background: 'rgba(220,38,38,0.85)', color: '#fff', fontSize: 11, border: 'none', cursor: 'pointer' }}
+          title="Remove"
+        >×</button>
+      </div>
+
+      <p className="text-xs text-gray-400 truncate leading-tight text-center" style={{ maxWidth: CARD_W }}
+        title={entry.cardName}>{entry.cardName}</p>
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DeckBuilderPage() {
@@ -179,6 +244,9 @@ export default function DeckBuilderPage() {
 
   const [hoverUri, setHoverUri] = useState<string | null>(null);
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>(() =>
+    (localStorage.getItem('deckViewMode') as 'list' | 'grid') ?? 'list'
+  );
 
   const [showImport, setShowImport] = useState(false);
 
@@ -385,6 +453,20 @@ export default function DeckBuilderPage() {
             Import text
           </button>
 
+          {/* View toggle */}
+          <div className="flex rounded-lg overflow-hidden border border-gray-700">
+            <button
+              onClick={() => { setViewMode('list'); localStorage.setItem('deckViewMode', 'list'); }}
+              className={`px-2.5 py-1.5 text-sm transition ${viewMode === 'list' ? 'bg-gray-700 text-gray-100' : 'text-gray-500 hover:text-gray-300'}`}
+              title="List view"
+            >📋</button>
+            <button
+              onClick={() => { setViewMode('grid'); localStorage.setItem('deckViewMode', 'grid'); }}
+              className={`px-2.5 py-1.5 text-sm transition ${viewMode === 'grid' ? 'bg-gray-700 text-gray-100' : 'text-gray-500 hover:text-gray-300'}`}
+              title="Grid view"
+            >🖼️</button>
+          </div>
+
           <div
             className={`text-sm font-mono px-3 py-1.5 rounded-lg border transition ${
               isValid
@@ -453,61 +535,116 @@ export default function DeckBuilderPage() {
           </div>
         </div>
 
-        {/* Right: Deck list */}
+        {/* Right: Deck list or grid */}
         <div className="flex-1 overflow-y-auto p-5">
-          {/* Commander slot */}
-          <section className="mb-6">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-yellow-600/80 mb-2">
-              Commander
-            </h2>
-            {commander ? (
-              <DeckCardRow
-                entry={commander}
-                isCommanderSlot
-                onAdjust={() => {}}
-                onRemove={() => removeCard(commander.scryfallId)}
-                onSetCommander={() => {}}
-                onHover={setHoverUri}
-                onHoverEnd={() => setHoverUri(null)}
-              />
-            ) : (
-              <div className="border border-dashed border-gray-800 rounded-lg px-3 py-2.5 text-gray-700 text-xs">
-                Search a card and click ⚜ to set your Commander
-              </div>
-            )}
-          </section>
-
-          {/* Grouped card sections */}
-          {groups.map(({ label, entries: groupEntries }) => (
-            <section key={label} className="mb-5">
-              <h2 className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2 flex items-center gap-2">
-                {label}
-                <span className="text-gray-700 font-normal normal-case tracking-normal">
-                  ({groupEntries.reduce((s, e) => s + e.quantity, 0)})
-                </span>
-              </h2>
-              <div className="flex flex-col gap-0.5">
-                {groupEntries.map((entry) => (
+          {viewMode === 'list' ? (
+            <>
+              {/* Commander slot */}
+              <section className="mb-6">
+                <h2 className="text-xs font-semibold uppercase tracking-widest text-yellow-600/80 mb-2">
+                  Commander
+                </h2>
+                {commander ? (
                   <DeckCardRow
-                    key={entry.scryfallId}
-                    entry={entry}
-                    isCommanderSlot={false}
-                    onAdjust={(d) => adjustQuantity(entry.scryfallId, d)}
-                    onRemove={() => removeCard(entry.scryfallId)}
-                    onSetCommander={() => setCommanderById(entry.scryfallId)}
+                    entry={commander}
+                    isCommanderSlot
+                    onAdjust={() => {}}
+                    onRemove={() => removeCard(commander.scryfallId)}
+                    onSetCommander={() => {}}
                     onHover={setHoverUri}
                     onHoverEnd={() => setHoverUri(null)}
                   />
-                ))}
-              </div>
-            </section>
-          ))}
+                ) : (
+                  <div className="border border-dashed border-gray-800 rounded-lg px-3 py-2.5 text-gray-700 text-xs">
+                    Search a card and click ⚜ to set your Commander
+                  </div>
+                )}
+              </section>
 
-          {entries.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-24 text-gray-700 gap-3">
-              <span className="text-5xl">🃏</span>
-              <p className="text-sm">Search for cards on the left to start building.</p>
-            </div>
+              {/* Grouped card sections */}
+              {groups.map(({ label, entries: groupEntries }) => (
+                <section key={label} className="mb-5">
+                  <h2 className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2 flex items-center gap-2">
+                    {label}
+                    <span className="text-gray-700 font-normal normal-case tracking-normal">
+                      ({groupEntries.reduce((s, e) => s + e.quantity, 0)})
+                    </span>
+                  </h2>
+                  <div className="flex flex-col gap-0.5">
+                    {groupEntries.map((entry) => (
+                      <DeckCardRow
+                        key={entry.scryfallId}
+                        entry={entry}
+                        isCommanderSlot={false}
+                        onAdjust={(d) => adjustQuantity(entry.scryfallId, d)}
+                        onRemove={() => removeCard(entry.scryfallId)}
+                        onSetCommander={() => setCommanderById(entry.scryfallId)}
+                        onHover={setHoverUri}
+                        onHoverEnd={() => setHoverUri(null)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
+
+              {entries.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-24 text-gray-700 gap-3">
+                  <span className="text-5xl">🃏</span>
+                  <p className="text-sm">Search for cards on the left to start building.</p>
+                </div>
+              )}
+            </>
+          ) : (
+            /* ── Grid view ── */
+            <>
+              {/* Commander */}
+              {commander && (
+                <section className="mb-6">
+                  <h2 className="text-xs font-semibold uppercase tracking-widest text-yellow-600/80 mb-3">
+                    Commander
+                  </h2>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10 }}>
+                    <DeckGridCard
+                      entry={commander}
+                      isCommander
+                      onRemove={() => removeCard(commander.scryfallId)}
+                      onHover={setHoverUri}
+                      onHoverEnd={() => setHoverUri(null)}
+                    />
+                  </div>
+                </section>
+              )}
+
+              {groups.map(({ label, entries: groupEntries }) => (
+                <section key={label} className="mb-6">
+                  <h2 className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-3 flex items-center gap-2">
+                    {label}
+                    <span className="text-gray-700 font-normal normal-case tracking-normal">
+                      ({groupEntries.reduce((s, e) => s + e.quantity, 0)})
+                    </span>
+                  </h2>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10 }}>
+                    {groupEntries.map((entry) => (
+                      <DeckGridCard
+                        key={entry.scryfallId}
+                        entry={entry}
+                        isCommander={false}
+                        onRemove={() => removeCard(entry.scryfallId)}
+                        onHover={setHoverUri}
+                        onHoverEnd={() => setHoverUri(null)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              ))}
+
+              {entries.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-24 text-gray-700 gap-3">
+                  <span className="text-5xl">🃏</span>
+                  <p className="text-sm">Search for cards on the left to start building.</p>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
