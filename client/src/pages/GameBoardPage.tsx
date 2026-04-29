@@ -1565,8 +1565,7 @@ function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsM
     }
     return init;
   });
-  const [trampleOn, setTrampleOn] = React.useState<Set<string>>(new Set());
-  const [trampleDmg, setTrampleDmg] = React.useState<Record<string, number>>({});
+  const [manualExcess, setManualExcess] = React.useState<Record<string, number>>({});
 
   function toggleIndestructible(id: string) {
     setIndestructible(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
@@ -1606,9 +1605,14 @@ function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsM
       if (r.isUnblocked && r.damageToPlayer > 0) {
         lifeLost.push({ targetUserId: r.attacker.targetUserId, amount: r.damageToPlayer, fromInstanceId: r.attacker.attackerId, isCommanderDmg: r.attacker.attackerIsCommander });
       }
-      if (!r.isUnblocked && trampleOn.has(r.attacker.attackerId)) {
-        const excess = trampleDmg[r.attacker.attackerId] ?? r.excessDamage;
-        if (excess > 0) lifeLost.push({ targetUserId: r.attacker.targetUserId, amount: excess, fromInstanceId: r.attacker.attackerId, isCommanderDmg: r.attacker.attackerIsCommander });
+      if (!r.isUnblocked && r.excessDamage > 0) {
+        const hasTrample = (r.attacker.attackerKeywords ?? []).includes('Trample');
+        if (hasTrample) {
+          lifeLost.push({ targetUserId: r.attacker.targetUserId, amount: r.excessDamage, fromInstanceId: r.attacker.attackerId, isCommanderDmg: r.attacker.attackerIsCommander });
+        } else {
+          const excess = manualExcess[r.attacker.attackerId] ?? 0;
+          if (excess > 0) lifeLost.push({ targetUserId: r.attacker.targetUserId, amount: excess, fromInstanceId: r.attacker.attackerId, isCommanderDmg: r.attacker.attackerIsCommander });
+        }
       }
     }
 
@@ -1702,19 +1706,27 @@ function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsM
                         </div>
                       );
                     })}
-                    {r.excessDamage > 0 && (
-                      <label style={{ fontSize: 10, color: '#fb923c', display: 'flex', alignItems: 'center', gap: 4, marginTop: 4, cursor: 'pointer' }}>
-                        <input type="checkbox" checked={trampleOn.has(r.attacker.attackerId)}
-                          onChange={() => setTrampleOn(prev => { const s = new Set(prev); s.has(r.attacker.attackerId) ? s.delete(r.attacker.attackerId) : s.add(r.attacker.attackerId); return s; })} />
-                        Has Trample — excess damage:
-                        <input type="number" min={0} max={r.excessDamage}
-                          value={trampleDmg[r.attacker.attackerId] ?? r.excessDamage}
-                          onChange={e => setTrampleDmg(prev => ({ ...prev, [r.attacker.attackerId]: Math.max(0, parseInt(e.target.value) || 0) }))}
-                          style={{ width: 40, fontSize: 10, background: '#1e293b', border: '1px solid #334155', color: '#e5e7eb', borderRadius: 4, padding: '1px 4px' }} />
-                        → {r.attacker.targetPlayerName}
-                        {r.attacker.attackerIsCommander && <span style={{ fontSize: 9, color: '#fbbf24' }}>👑</span>}
-                      </label>
-                    )}
+                    {r.excessDamage > 0 && (() => {
+                      const hasTrample = (r.attacker.attackerKeywords ?? []).includes('Trample');
+                      if (hasTrample) {
+                        return (
+                          <div style={{ fontSize: 10, color: '#d97706', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            🦶 Trample — {r.excessDamage} excess damage → {r.attacker.targetPlayerName}
+                            {r.attacker.attackerIsCommander && <span style={{ fontSize: 9, color: '#fbbf24' }}>👑</span>}
+                          </div>
+                        );
+                      }
+                      return (
+                        <label style={{ fontSize: 10, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 4, marginTop: 4, cursor: 'pointer' }}>
+                          Excess dmg ({r.excessDamage} max):
+                          <input type="number" min={0} max={r.excessDamage}
+                            value={manualExcess[r.attacker.attackerId] ?? 0}
+                            onChange={e => setManualExcess(prev => ({ ...prev, [r.attacker.attackerId]: Math.max(0, Math.min(r.excessDamage, parseInt(e.target.value) || 0)) }))}
+                            style={{ width: 40, fontSize: 10, background: '#1e293b', border: '1px solid #334155', color: '#e5e7eb', borderRadius: 4, padding: '1px 4px' }} />
+                          → {r.attacker.targetPlayerName}
+                        </label>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
