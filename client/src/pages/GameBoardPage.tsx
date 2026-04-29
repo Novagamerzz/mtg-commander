@@ -1492,38 +1492,40 @@ interface CombatCalcResult {
   isUnblocked: boolean;
   excessDamage: number;
   damageToPlayer: number;
+  lifelinkGain: number;
 }
 
 function calcCombatResults(attacks: CombatAttackEntry[], blocks: CombatBlockEntry[]): CombatCalcResult[] {
   return attacks.map(atk => {
     const myBlocks = blocks.filter(b => b.blockingAttackerId === atk.attackerId);
     const atkPT = effectivePT(atk.attackerPower, atk.attackerToughness, atk.attackerCounters);
+    const hasDeathtouch = (atk.attackerKeywords ?? []).includes('Deathtouch');
+    const hasLifelink = (atk.attackerKeywords ?? []).includes('Lifelink');
 
     if (myBlocks.length === 0) {
-      console.log(`[combat] ${atk.attackerName}(${atkPT.power}/${atkPT.toughness}): UNBLOCKED → deals ${atkPT.power} to ${atk.targetPlayerName}`);
-      return { attacker: atk, blockers: [], attackerDies: false, dyingBlockers: [], isUnblocked: true, excessDamage: 0, damageToPlayer: atkPT.power };
+      const dmg = atkPT.power;
+      return { attacker: atk, blockers: [], attackerDies: false, dyingBlockers: [], isUnblocked: true, excessDamage: 0, damageToPlayer: dmg, lifelinkGain: hasLifelink ? dmg : 0 };
     }
 
-    // Each blocker receives the attacker's full power as damage
     const dyingBlockers: string[] = [];
     let totalBlockerToughness = 0;
     const totalBlockerPower = myBlocks.reduce((s, b) => s + effectivePT(b.blockerPower, b.blockerToughness, b.blockerCounters).power, 0);
+    const anyDeathtouchBlocker = myBlocks.some(b => (b.blockerKeywords ?? []).includes('Deathtouch'));
 
     for (const b of myBlocks) {
       const bPT = effectivePT(b.blockerPower, b.blockerToughness, b.blockerCounters);
       totalBlockerToughness += bPT.toughness;
-      // Blocker dies if it takes damage >= its toughness; attacker deals its full power to each blocker
-      const dies = atkPT.power >= bPT.toughness;
-      console.log(`[combat] ${atk.attackerName}(${atkPT.power}/${atkPT.toughness}) vs ${b.blockerName}(${bPT.power}/${bPT.toughness}): blocker dies=${dies}`);
+      // Deathtouch: any damage (power > 0) kills the blocker
+      const dies = atkPT.power > 0 && (hasDeathtouch || atkPT.power >= bPT.toughness);
       if (dies) dyingBlockers.push(b.blockerId);
     }
 
-    const attackerDies = totalBlockerPower >= atkPT.toughness;
-    console.log(`[combat] ${atk.attackerName}: total blocker power=${totalBlockerPower} vs toughness=${atkPT.toughness}: attacker dies=${attackerDies}`);
-
+    // Deathtouch blocker: any damage from blocker kills attacker
+    const attackerDies = totalBlockerPower >= atkPT.toughness || (anyDeathtouchBlocker && totalBlockerPower > 0);
     const excessDamage = Math.max(0, atkPT.power - totalBlockerToughness);
+    const lifelinkGain = hasLifelink ? atkPT.power : 0;
 
-    return { attacker: atk, blockers: myBlocks, attackerDies, dyingBlockers, isUnblocked: false, excessDamage, damageToPlayer: 0 };
+    return { attacker: atk, blockers: myBlocks, attackerDies, dyingBlockers, isUnblocked: false, excessDamage, damageToPlayer: 0, lifelinkGain };
   });
 }
 
@@ -1531,7 +1533,7 @@ function calcCombatResults(attacks: CombatAttackEntry[], blocks: CombatBlockEntr
 
 interface CombatResultsModalProps {
   combatState: PersonalCombatState;
-  onConfirm: (payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] }) => void;
+  onConfirm: (payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[]; lifeGain: { userId: string; amount: number }[] }) => void;
   onCancel: () => void;
 }
 
@@ -1540,7 +1542,17 @@ type CmdChoice = 'command_zone' | 'graveyard';
 
 function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsModalProps) {
   const results = React.useMemo(() => calcCombatResults(combatState.attacks, combatState.blocks), [combatState]);
-  const [indestructible, setIndestructible] = React.useState<Set<string>>(new Set());
+  const [indestructible, setIndestructible] = React.useState<Set<string>>(() => {
+    const s = new Set<string>();
+    for (const r of calcCombatResults(combatState.attacks, combatState.blocks)) {
+      if ((r.attacker.attackerKeywords ?? []).includes('Indestructible')) s.add(r.attacker.attackerId);
+      for (const bid of r.dyingBlockers) {
+        const blk = combatState.blocks.find(b => b.blockerId === bid);
+        if ((blk?.blockerKeywords ?? []).includes('Indestructible')) s.add(bid);
+      }
+    }
+    return s;
+  });
   // default: commanders go back to command zone
   const [cmdChoices, setCmdChoices] = React.useState<Record<string, CmdChoice>>(() => {
     const init: Record<string, CmdChoice> = {};
@@ -1564,8 +1576,13 @@ function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsM
     const deadToGY: string[] = [];
     const deadToCommandZone: string[] = [];
     const lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] = [];
+    const lifeGain: { userId: string; amount: number }[] = [];
 
     for (const r of results) {
+      // Lifelink gain for attacker's controller
+      if (r.lifelinkGain > 0) {
+        lifeGain.push({ userId: r.attacker.attackingUserId, amount: r.lifelinkGain });
+      }
       // Attacker death
       if (r.attackerDies && !indestructible.has(r.attacker.attackerId)) {
         if (r.attacker.attackerIsCommander && cmdChoices[r.attacker.attackerId] === 'command_zone') {
@@ -1595,7 +1612,7 @@ function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsM
       }
     }
 
-    onConfirm({ deadToGY, deadToCommandZone, lifeLost });
+    onConfirm({ deadToGY, deadToCommandZone, lifeLost, lifeGain });
   }
 
   const overlay: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center' };
@@ -1639,6 +1656,9 @@ function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsM
                   <span style={{ fontSize: 11, fontWeight: 700, color: '#f87171' }}>⚔️ {r.attacker.attackerName}</span>
                   {r.attacker.attackerPower != null && <span style={pill('rgba(239,68,68,0.2)', '#f87171')}>{atkPT.power}/{atkPT.toughness}</span>}
                   {r.attacker.attackerIsCommander && <span style={pill('rgba(250,204,21,0.2)', '#fbbf24')}>CMD</span>}
+                  {(r.attacker.attackerKeywords ?? []).includes('Lifelink') && <span style={pill('rgba(244,114,182,0.25)', '#f9a8d4')}>♥ Lifelink +{atkPT.power}</span>}
+                  {(r.attacker.attackerKeywords ?? []).includes('Deathtouch') && <span style={pill('rgba(167,139,250,0.25)', '#c4b5fd')}>☠ Deathtouch</span>}
+                  {(r.attacker.attackerKeywords ?? []).includes('Indestructible') && <span style={pill('rgba(250,204,21,0.2)', '#fbbf24')}>◆ Indestruct.</span>}
                 </div>
                 {r.attackerDies && !indestructible.has(r.attacker.attackerId) && (
                   <CommanderDeathChoice id={r.attacker.attackerId} name={r.attacker.attackerName} isCommander={r.attacker.attackerIsCommander} />
@@ -1742,13 +1762,39 @@ interface CombatPanelProps {
   onConfirmBlockers: () => void;
   onResolveDamage: () => void;
   onEndPhase: () => void;
+  onCombatBack: () => void;
+}
+
+const KEYWORD_PILL: Record<string, { bg: string; color: string }> = {
+  'Flying':        { bg: 'rgba(99,102,241,0.25)',  color: '#a5b4fc' },
+  'First Strike':  { bg: 'rgba(251,146,60,0.25)',  color: '#fb923c' },
+  'Double Strike': { bg: 'rgba(251,146,60,0.35)',  color: '#fb923c' },
+  'Vigilance':     { bg: 'rgba(74,222,128,0.2)',   color: '#86efac' },
+  'Deathtouch':    { bg: 'rgba(167,139,250,0.25)', color: '#c4b5fd' },
+  'Lifelink':      { bg: 'rgba(244,114,182,0.25)', color: '#f9a8d4' },
+  'Indestructible':{ bg: 'rgba(250,204,21,0.2)',   color: '#fbbf24' },
+  'Menace':        { bg: 'rgba(239,68,68,0.2)',    color: '#f87171' },
+  'Trample':       { bg: 'rgba(180,83,9,0.3)',     color: '#d97706' },
+  'Reach':         { bg: 'rgba(34,197,94,0.2)',    color: '#4ade80' },
+};
+function KeywordBadges({ keywords }: { keywords: string[] }) {
+  const relevant = keywords.filter(k => k in KEYWORD_PILL);
+  if (!relevant.length) return null;
+  return (
+    <span style={{ display: 'inline-flex', gap: 3, flexWrap: 'wrap' }}>
+      {relevant.map(k => {
+        const s = KEYWORD_PILL[k];
+        return <span key={k} style={{ background: s.bg, color: s.color, borderRadius: 3, padding: '0 4px', fontSize: 8, fontWeight: 700, whiteSpace: 'nowrap' }}>{k}</span>;
+      })}
+    </span>
+  );
 }
 
 function CombatPanel({
   phase, combatState, isMyTurn, myUserId, myBattlefield, opponentPlayers,
   selectedAttackers, attackerTargets, selectedBlockerToAssign, blockerAssignments,
   onToggleAttacker, onSetAttackerTarget, onConfirmAttackers, onSkipCombat,
-  onSelectBlockerToAssign, onAssignBlocker, onRemoveBlocker, onConfirmBlockers, onResolveDamage, onEndPhase,
+  onSelectBlockerToAssign, onAssignBlocker, onRemoveBlocker, onConfirmBlockers, onResolveDamage, onEndPhase, onCombatBack,
 }: CombatPanelProps) {
   const COMBAT_PHASES: TurnPhase[] = ['begin_combat','declare_attackers','declare_blockers','damage','end_combat'];
   if (!COMBAT_PHASES.includes(phase)) return null;
@@ -1777,6 +1823,10 @@ function CombatPanel({
     ...btnBase,
     background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.5)', color: '#a5b4fc',
     boxShadow: '0 0 10px rgba(99,102,241,0.2)',
+  };
+  const backBtn: React.CSSProperties = {
+    ...btnBase,
+    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#6b7280',
   };
 
   if (phase === 'begin_combat') {
@@ -1826,7 +1876,8 @@ function CombatPanel({
               })}
             </div>
           )}
-          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+            <button style={backBtn} onClick={onCombatBack}>← Back</button>
             <button style={{ ...primaryBtn, opacity: selectedList.length === 0 ? 0.4 : 1 }}
               disabled={selectedList.length === 0}
               onClick={onConfirmAttackers}>
@@ -1873,9 +1924,19 @@ function CombatPanel({
                       ? <img src={atk.attackerImage} style={{ width: 36, height: 50, objectFit: 'cover', borderRadius: 4, border: '1px solid rgba(239,68,68,0.6)', flexShrink: 0 }} />
                       : <div style={{ width: 36, height: 50, background: '#1f2937', borderRadius: 4, flexShrink: 0 }} />}
                     <div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: '#f87171' }}>⚔️ {atk.attackerName}</span>
-                      {atk.attackerPower != null && <span style={{ fontSize: 10, color: '#9ca3af', marginLeft: 4 }}>{atkPT.power}/{atkPT.toughness}</span>}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#f87171' }}>⚔️ {atk.attackerName}</span>
+                        {atk.attackerPower != null && <span style={{ fontSize: 10, color: '#9ca3af' }}>{atkPT.power}/{atkPT.toughness}</span>}
+                        <KeywordBadges keywords={atk.attackerKeywords ?? []} />
+                      </div>
                       <div style={{ fontSize: 9, color: '#6b7280' }}>→ {atk.targetPlayerName}</div>
+                      {(atk.attackerKeywords ?? []).includes('Flying') && (
+                        <div style={{ fontSize: 9, color: '#a5b4fc', marginTop: 2 }}>✈ Only Flying/Reach creatures can block</div>
+                      )}
+                      {(atk.attackerKeywords ?? []).includes('Menace') && (() => {
+                        const assignedCount = Array.from(blockerAssignments.entries()).filter(([, aid]) => aid === atk.attackerId).length;
+                        return assignedCount < 2 ? <div style={{ fontSize: 9, color: '#f87171', marginTop: 2 }}>⚠ Menace: must be blocked by 2+ creatures</div> : null;
+                      })()}
                     </div>
                     {selectedBlockerToAssign && (
                       <button onClick={() => onAssignBlocker(atk.attackerId)}
@@ -1938,9 +1999,12 @@ function CombatPanel({
       // Active player or spectator — phase auto-advances when defender confirms blockers
       return (
         <div style={panelStyle}>
-          <span style={{ fontSize: 13, color: isMyTurn ? '#fb923c' : '#9ca3af', fontWeight: isMyTurn ? 700 : 400 }}>
-            ⏳ Waiting for defenders to declare blockers…
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+            <span style={{ fontSize: 13, color: isMyTurn ? '#fb923c' : '#9ca3af', fontWeight: isMyTurn ? 700 : 400 }}>
+              ⏳ Waiting for defenders to declare blockers…
+            </span>
+            {isMyTurn && <button style={backBtn} onClick={onCombatBack}>← Back</button>}
+          </div>
         </div>
       );
     }
@@ -1954,7 +2018,12 @@ function CombatPanel({
       <div style={panelStyle}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 8 }}>
           <p style={{ fontSize: 11, color: '#fb923c', fontWeight: 700 }}>💥 DAMAGE STEP</p>
-          {isMyTurn && <button style={primaryBtn} onClick={onResolveDamage}>⚔️ Calculate &amp; Resolve →</button>}
+          {isMyTurn && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={backBtn} onClick={onCombatBack}>← Back</button>
+              <button style={primaryBtn} onClick={onResolveDamage}>⚔️ Calculate &amp; Resolve →</button>
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {results.map(r => {
@@ -1962,9 +2031,10 @@ function CombatPanel({
             const myBlocks = blocks.filter(b => b.blockingAttackerId === r.attacker.attackerId);
             return (
               <div key={r.attacker.attackerId} style={{ fontSize: 11, color: '#e5e7eb', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <span style={{ color: '#f87171', fontWeight: 700 }}>⚔️ {r.attacker.attackerName}</span>
                   {r.attacker.attackerPower != null && <span style={{ fontSize: 9, color: '#6b7280' }}>{atkPT.power}/{atkPT.toughness}</span>}
+                  <KeywordBadges keywords={r.attacker.attackerKeywords ?? []} />
                   <span style={{ color: '#6b7280' }}>→</span>
                   {myBlocks.length === 0 ? (
                     <span style={{ color: '#facc15', fontWeight: 700 }}>UNBLOCKED 🎯 {r.attacker.targetPlayerName} ({atkPT.power} dmg)</span>
@@ -3340,9 +3410,17 @@ export default function GameBoardPage() {
     setBlockerAssignments(prev => { const m = new Map(prev); m.delete(blockerId); return m; });
   }
 
-  function handleResolveCombat(payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] }) {
+  function handleResolveCombat(payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[]; lifeGain: { userId: string; amount: number }[] }) {
     socket.emit('game:resolve_combat', payload);
     setShowCombatResults(false);
+  }
+
+  function handleCombatBack() {
+    socket.emit('game:combat_back');
+    setSelectedAttackers(new Set());
+    setAttackerTargets(new Map());
+    setSelectedBlockerToAssign(null);
+    setBlockerAssignments(new Map());
   }
 
   // ── Timing helper ─────────────────────────────────────────────────────────────
@@ -3502,6 +3580,7 @@ export default function GameBoardPage() {
         onConfirmBlockers={handleDeclareBlockers}
         onResolveDamage={() => setShowCombatResults(true)}
         onEndPhase={emit.endPhase}
+        onCombatBack={handleCombatBack}
       />
 
       {/* ── Combat Results Modal ── */}

@@ -170,6 +170,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
         targetUserId: a.targetUserId, targetPlayerName: tgtP?.playerName ?? '?',
         attackerPower: card?.power ?? null, attackerToughness: card?.toughness ?? null,
         attackerCounters: card?.counters ?? {}, attackerIsCommander: card?.isCommander ?? false,
+        attackerKeywords: card?.keywords ?? [],
       };
     }),
     blocks: game.combatState.blocks.map(b => {
@@ -181,6 +182,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
         defendingUserId: b.defendingUserId, defendingPlayerName: defP?.playerName ?? '?',
         blockerPower: card?.power ?? null, blockerToughness: card?.toughness ?? null,
         blockerCounters: card?.counters ?? {}, blockerIsCommander: card?.isCommander ?? false,
+        blockerKeywords: card?.keywords ?? [],
       };
     }),
   } : null;
@@ -1215,10 +1217,10 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Tap all attacking creatures
+    // Tap all attacking creatures (Vigilance: skip tapping)
     for (const atk of attacks) {
       const card = player.battlefield.find(c => c.instanceId === atk.attackerId);
-      if (card) card.tapped = true;
+      if (card && !(card.keywords ?? []).includes('Vigilance')) card.tapped = true;
     }
     game.combatState = {
       attacks: attacks.map(a => ({ attackerId: a.attackerId, attackingUserId: player.userId, targetUserId: a.targetUserId })),
@@ -1254,7 +1256,38 @@ io.on('connection', (socket) => {
     broadcastGame(game);
   });
 
-  socket.on('game:resolve_combat', ({ deadToGY, deadToCommandZone, lifeLost }) => {
+  socket.on('game:combat_back', () => {
+    const game = getGame(socket.id);
+    if (!game) return;
+    const player = game.players.find(p => p.socketId === socket.id);
+    if (!player || game.players[game.activePlayerIndex].socketId !== socket.id) return;
+
+    if (game.phase === 'declare_attackers') {
+      game.phase = 'begin_combat';
+      appendLog(game, `${player.playerName} stepped back to Begin Combat`);
+      broadcastGame(game);
+    } else if (game.phase === 'declare_blockers') {
+      // Un-tap the attackers and clear combat state
+      if (game.combatState) {
+        for (const atk of game.combatState.attacks) {
+          const card = player.battlefield.find(c => c.instanceId === atk.attackerId);
+          if (card) card.tapped = false;
+        }
+        game.combatState = null;
+      }
+      game.phase = 'declare_attackers';
+      appendLog(game, `${player.playerName} stepped back to Declare Attackers`);
+      broadcastGame(game);
+    } else if (game.phase === 'damage') {
+      // Clear blocks, keep attacks
+      if (game.combatState) game.combatState.blocks = [];
+      game.phase = 'declare_blockers';
+      appendLog(game, `${player.playerName} stepped back to Declare Blockers`);
+      broadcastGame(game);
+    }
+  });
+
+  socket.on('game:resolve_combat', ({ deadToGY, deadToCommandZone, lifeLost, lifeGain }) => {
     const game = getGame(socket.id);
     if (!game || game.phase !== 'damage') return;
     const activePlayer = game.players[game.activePlayerIndex];
@@ -1328,6 +1361,14 @@ io.on('connection', (socket) => {
       if (prevLife > 0 && target.life <= 0 && !game.pendingElimination) {
         game.pendingElimination = { socketId: target.socketId, playerName: target.playerName, reason: `Life: ${target.life}` };
       }
+    }
+
+    // Apply lifelink gains
+    for (const lg of (lifeGain ?? [])) {
+      const target = game.players.find(p => p.userId === lg.userId);
+      if (!target || target.eliminated) continue;
+      target.life += lg.amount;
+      appendLog(game, `${target.playerName}: +${lg.amount} life (Lifelink)`);
     }
 
     // Advance to end_combat and clear combat state

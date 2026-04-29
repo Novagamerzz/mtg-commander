@@ -105,12 +105,14 @@ export interface CombatAttackEntry {
   targetUserId: string; targetPlayerName: string;
   attackerPower: string | null; attackerToughness: string | null;
   attackerCounters: Record<string, number>; attackerIsCommander: boolean;
+  attackerKeywords: string[];
 }
 export interface CombatBlockEntry {
   blockerId: string; blockerName: string; blockerImage: string;
   blockingAttackerId: string; defendingUserId: string; defendingPlayerName: string;
   blockerPower: string | null; blockerToughness: string | null;
   blockerCounters: Record<string, number>; blockerIsCommander: boolean;
+  blockerKeywords: string[];
 }
 export interface PersonalCombatState {
   attacks: CombatAttackEntry[];
@@ -206,5 +208,6 @@ export interface ClientToServerEvents {
   'chat:send': (message: string) => void;
   'game:declare_attackers': (payload: { attacks: { attackerId: string; targetUserId: string }[] }) => void;
   'game:declare_blockers': (payload: { blocks: { blockerId: string; blockingAttackerId: string }[] }) => void;
-  'game:resolve_combat': (payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] }) => void;
+  'game:resolve_combat': (payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[]; lifeGain?: { userId: string; amount: number }[] }) => void;
+  'game:combat_back': () => void;
 }
