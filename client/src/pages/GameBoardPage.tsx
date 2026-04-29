@@ -632,7 +632,13 @@ const COUNTER_META: Record<string, { sym: string; label: string; color: string; 
   'charge':  { sym: '⚡',   label: 'Charge',  color: '#93c5fd', bg: '#1e3a8a' },
   'time':    { sym: '⏳',   label: 'Time',    color: '#e2e8f0', bg: '#334155' },
   'poison':  { sym: '☠',   label: 'Poison',  color: '#d8b4fe', bg: '#4c1d95' },
+  '+1/+0':   { sym: '+1/+0', label: '+1/+0',  color: '#86efac', bg: '#166534' },
+  '+0/+1':   { sym: '+0/+1', label: '+0/+1',  color: '#93c5fd', bg: '#1e3a8a' },
+  '-1/+0':   { sym: '-1/+0', label: '-1/+0',  color: '#fca5a5', bg: '#7f1d1d' },
+  '+0/-1':   { sym: '+0/-1', label: '+0/-1',  color: '#e9d5ff', bg: '#4c1d95' },
 };
+
+const PT_COUNTER_TYPES = ['+1/+0', '+0/+1', '-1/+0', '+0/-1'] as const;
 
 function CounterBadge({ type, count }: { type: string; count: number }) {
   const m = COUNTER_META[type] ?? { sym: type.slice(0, 4), color: '#e2e8f0', bg: '#374151' };
@@ -671,9 +677,9 @@ function PtBar({ card }: { card: GameCard }) {
 
   const plusOne  = card.counters?.['+1/+1'] ?? 0;
   const minusOne = card.counters?.['-1/-1'] ?? 0;
-  const delta = plusOne - minusOne;
-
-  console.log('PtBar rendering for', card.name, card.power);
+  const base     = plusOne - minusOne;
+  const powerDelta = base + (card.counters?.['+1/+0'] ?? 0) - (card.counters?.['-1/+0'] ?? 0);
+  const toughDelta = base + (card.counters?.['+0/+1'] ?? 0) - (card.counters?.['+0/-1'] ?? 0);
 
   return (
     <div style={{
@@ -684,10 +690,10 @@ function PtBar({ card }: { card: GameCard }) {
       fontSize: 14, fontWeight: 800, color: '#f1f5f9',
     }}>
       <span style={{ fontSize: 11 }}>⚔</span>
-      <span>{fmt(card.power, delta)}</span>
+      <span>{fmt(card.power, powerDelta)}</span>
       <span style={{ opacity: 0.35, fontSize: 12 }}>/</span>
       <span style={{ fontSize: 11 }}>🛡</span>
-      <span>{fmt(card.toughness, delta)}</span>
+      <span>{fmt(card.toughness, toughDelta)}</span>
     </div>
   );
 }
@@ -755,14 +761,15 @@ function TokenCard({
 
   const plusOne  = counters['+1/+1'] ?? 0;
   const minusOne = counters['-1/-1'] ?? 0;
-  const delta    = plusOne - minusOne;
+  const base     = plusOne - minusOne;
+  const powerDelta = base + (counters['+1/+0'] ?? 0) - (counters['-1/+0'] ?? 0);
+  const toughDelta = base + (counters['+0/+1'] ?? 0) - (counters['+0/-1'] ?? 0);
 
   // basePower/baseToughness stored by server at creation; fall back to parsing power/toughness strings
   const basePow = card.basePower ?? (parseInt(card.power ?? '0', 10) || 0);
   const baseTou = card.baseToughness ?? (parseInt(card.toughness ?? '1', 10) || 1);
-  // No floor — creature dies server-side when toughness ≤ 0; show actual value until then
-  const displayP = basePow + delta;
-  const displayT = baseTou + delta;
+  const displayP = basePow + powerDelta;
+  const displayT = baseTou + toughDelta;
 
   const qty = counters['quantity'] ?? 1;
 
@@ -803,10 +810,11 @@ function TokenCard({
         {isCreature ? (
           <>
             {/* Counter badges — top-left, same style as regular creatures */}
-            {(plusOne > 0 || minusOne > 0) && (
+            {Object.values(counters).some(n => n > 0) && (
               <div style={{ position: 'absolute', top: 3, left: 3, display: 'flex', flexDirection: 'column', gap: 2, zIndex: 15, pointerEvents: 'none' }}>
-                {plusOne  > 0 && <CounterBadge type="+1/+1" count={plusOne}  />}
-                {minusOne > 0 && <CounterBadge type="-1/-1" count={minusOne} />}
+                {Object.entries(counters).filter(([, n]) => n > 0).map(([type, n]) => (
+                  <CounterBadge key={type} type={type} count={n} />
+                ))}
               </div>
             )}
             {/* Single live P/T pill at bottom */}
@@ -868,10 +876,12 @@ function TokenCard({
               { label: '🪦 Send to Graveyard', action: () => { onGraveyard();  setMenuOpen(false); }, color: '#94a3b8' },
               { label: '↗ Exile',              action: () => { onExile();      setMenuOpen(false); }, color: '#c4b5fd' },
               ...(isCreature ? [
-                { label: '+ +1/+1 Counter', action: () => { onUpdateCounter('+1/+1',  1); setMenuOpen(false); }, color: '#4ade80' },
-                { label: '+ -1/-1 Counter', action: () => { onUpdateCounter('-1/-1',  1); setMenuOpen(false); }, color: '#f87171' },
-                ...(plusOne > 0  ? [{ label: '− +1/+1 Counter', action: () => { onUpdateCounter('+1/+1', -1); setMenuOpen(false); }, color: '#94a3b8' }] : []),
-                ...(minusOne > 0 ? [{ label: '− -1/-1 Counter', action: () => { onUpdateCounter('-1/-1', -1); setMenuOpen(false); }, color: '#94a3b8' }] : []),
+                { label: '+ +1/+1', action: () => { onUpdateCounter('+1/+1', 1); setMenuOpen(false); }, color: '#4ade80' },
+                { label: '+ -1/-1', action: () => { onUpdateCounter('-1/-1', 1); setMenuOpen(false); }, color: '#f87171' },
+                { label: '+ +1/+0 (power)', action: () => { onUpdateCounter('+1/+0', 1); setMenuOpen(false); }, color: '#86efac' },
+                { label: '+ +0/+1 (toughness)', action: () => { onUpdateCounter('+0/+1', 1); setMenuOpen(false); }, color: '#93c5fd' },
+                { label: '+ -1/+0 (power)', action: () => { onUpdateCounter('-1/+0', 1); setMenuOpen(false); }, color: '#fca5a5' },
+                { label: '+ +0/-1 (toughness)', action: () => { onUpdateCounter('+0/-1', 1); setMenuOpen(false); }, color: '#e9d5ff' },
               ] : []),
             ] as { label: string; action: () => void; color: string }[]).map(({ label, action, color }) => (
               <button key={label} onClick={action}
@@ -1122,6 +1132,35 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
                       </div>
                     );
                   })}
+                  {/* P/T-only counters — creature cards only */}
+                  {(card.typeLine ?? '').includes('Creature') && (
+                    <>
+                      <p style={{ fontSize: 11, color: '#64748b', padding: '8px 18px 4px',
+                        fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>P/T Only</p>
+                      {PT_COUNTER_TYPES.map((type) => {
+                        const m = COUNTER_META[type];
+                        const n = counters[type] ?? 0;
+                        const btnStyle: React.CSSProperties = {
+                          width: 28, height: 28, borderRadius: 7, background: '#1e293b',
+                          border: '1px solid #334155', color: '#cbd5e1', fontSize: 18,
+                          lineHeight: 1, cursor: 'pointer', flexShrink: 0, display: 'flex',
+                          alignItems: 'center', justifyContent: 'center',
+                        };
+                        return (
+                          <div key={type} style={{ display: 'flex', alignItems: 'center',
+                            padding: '5px 12px 5px 18px', gap: 10 }}>
+                            <span style={{ fontSize: 14, color: m.color, fontWeight: 700, flex: 1 }}>
+                              {m.label}
+                            </span>
+                            <button onClick={() => onUpdateCounter(type, -1)} style={btnStyle}>−</button>
+                            <span style={{ fontSize: 15, fontWeight: 800,
+                              color: n > 0 ? m.color : '#475569', minWidth: 26, textAlign: 'center' }}>{n}</span>
+                            <button onClick={() => onUpdateCounter(type, 1)} style={btnStyle}>+</button>
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
                   {hasCounters && (
                     <button onClick={() => { Object.keys(counters).forEach((t) => onUpdateCounter(t, -(counters[t] ?? 0))); }}
                       style={{ display: 'block', width: '100%', textAlign: 'left',
@@ -1189,7 +1228,7 @@ const ZONE_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7'];
 const CANVAS_W = 3200;
 const CANVAS_H = 2000;
 const OPP_INFO_H = 72;  // opponent info header height
-const MY_LABEL_H = 32;  // my zone top label height
+const MY_LABEL_H = 72;  // my zone top info bar height (matches OPP_INFO_H)
 
 // Keyword abbreviation map
 const KEYWORD_ABBR: Record<string, string> = {
@@ -1431,13 +1470,14 @@ function ZoneHeader({ player, color, isMonarch }: { player: PersonalPlayerState;
 // ── Combat utility ───────────────────────────────────────────────────────────
 
 function effectivePT(basePow: string | null, baseTou: string | null, counters: Record<string, number> = {}) {
-  const delta = (counters['+1/+1'] ?? 0) - (counters['-1/-1'] ?? 0);
-  // Treat '*' as 1: star creatures enter as 1/1 and grow via counters
+  const base = (counters['+1/+1'] ?? 0) - (counters['-1/-1'] ?? 0);
+  const powerDelta = base + (counters['+1/+0'] ?? 0) - (counters['-1/+0'] ?? 0);
+  const toughDelta = base + (counters['+0/+1'] ?? 0) - (counters['+0/-1'] ?? 0);
   const rawP = basePow === '*' ? 1 : basePow !== null ? parseInt(basePow, 10) : 0;
   const rawT = baseTou === '*' ? 1 : baseTou !== null ? parseInt(baseTou, 10) : 1;
   return {
-    power:     Math.max(0, (isNaN(rawP) ? 0 : rawP) + delta),
-    toughness: Math.max(0, (isNaN(rawT) ? 1 : rawT) + delta),
+    power:     Math.max(0, (isNaN(rawP) ? 0 : rawP) + powerDelta),
+    toughness: Math.max(0, (isNaN(rawT) ? 1 : rawT) + toughDelta),
   };
 }
 
@@ -2302,18 +2342,8 @@ function TableCanvas({
           boxShadow: me.isActive ? `0 0 50px ${myColor}28, inset 0 0 30px ${myColor}08` : `inset 0 0 20px ${myColor}06`,
         }}>
 
-          {/* My name label */}
-          <div style={{ position: 'absolute', top: 7, left: 14, zIndex: 2, pointerEvents: 'none',
-            display: 'flex', alignItems: 'center', gap: 6 }}>
-            {me.isActive && (
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#facc15',
-                boxShadow: '0 0 6px #facc15', display: 'inline-block' }} />
-            )}
-            {me.socketId === monarchSocketId && (
-              <span style={{ fontSize: 12, lineHeight: 1 }} title="You are the Monarch">👑</span>
-            )}
-            <span style={{ fontSize: 13, fontWeight: 800, color: `${myColor}ee` }}>{me.playerName}</span>
-          </div>
+          {/* My info bar — same layout as opponent ZoneHeader */}
+          <ZoneHeader player={me} color={myColor} isMonarch={me.socketId === monarchSocketId} />
 
           {/* Drop highlight overlay */}
           {overBf && (
@@ -2647,18 +2677,40 @@ function wrapSvgText(text: string, maxChars: number): string[] {
   return lines;
 }
 
-function makeTokenImageUri(name: string, pt: string, color: string, oracleText = ''): string {
+function makeTokenImageUri(name: string, pt: string, colors: string | string[], oracleText = ''): string {
   const bg: Record<string, string> = {
     white: '#cfc08a', blue: '#1c3d6b', black: '#1a1228', red: '#6b1c1c', green: '#1c4a2a', colorless: '#3a3a4a',
   };
   const bd: Record<string, string> = {
     white: '#a89850', blue: '#4a7ec4', black: '#7a4ab4', red: '#c44a4a', green: '#4a9a5a', colorless: '#7a7a8a',
   };
-  const bgC = bg[color] ?? bg.colorless;
-  const bdC = bd[color] ?? bd.colorless;
+  const colorArr = Array.isArray(colors) ? colors : [colors];
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
   const n = esc(name);
   const hasNoPt = !pt || pt === '/';
+
+  // Build background fill (solid, diagonal-split, or gradient)
+  let defs = '';
+  let bgFill: string;
+  if (colorArr.length <= 1) {
+    bgFill = bg[colorArr[0]] ?? bg.colorless;
+  } else if (colorArr.length === 2) {
+    const c1 = bg[colorArr[0]] ?? bg.colorless;
+    const c2 = bg[colorArr[1]] ?? bg.colorless;
+    defs = `<defs><linearGradient id="tbg" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox"><stop offset="50%" stop-color="${c1}"/><stop offset="50%" stop-color="${c2}"/></linearGradient></defs>`;
+    bgFill = 'url(#tbg)';
+  } else {
+    const stops = colorArr.map((c, i) => {
+      const pct = Math.round((i / (colorArr.length - 1)) * 100);
+      return `<stop offset="${pct}%" stop-color="${bg[c] ?? bg.colorless}"/>`;
+    }).join('');
+    defs = `<defs><linearGradient id="tbg" x1="0" y1="0" x2="1" y2="0">${stops}</linearGradient></defs>`;
+    bgFill = 'url(#tbg)';
+  }
+
+  // Border color: use first color, or gold for multi-color
+  const bdC = colorArr.length === 1 ? (bd[colorArr[0]] ?? bd.colorless) : '#c8a84b';
+
   let body = '';
   if (hasNoPt && oracleText) {
     const lines = wrapSvgText(oracleText, 26).slice(0, 9);
@@ -2668,7 +2720,7 @@ function makeTokenImageUri(name: string, pt: string, color: string, oracleText =
   } else if (!hasNoPt) {
     body = `<rect x="55" y="168" width="90" height="38" rx="6" fill="rgba(0,0,0,0.45)" stroke="${bdC}" stroke-width="1"/><text x="100" y="194" font-family="Georgia,serif" font-size="22" fill="white" text-anchor="middle" font-weight="bold">${esc(pt)}</text>`;
   }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="280" viewBox="0 0 200 280"><rect width="200" height="280" rx="10" fill="${bgC}" stroke="${bdC}" stroke-width="3"/><rect x="8" y="8" width="184" height="264" rx="7" fill="none" stroke="${bdC}" stroke-width="1" opacity="0.5"/><text x="100" y="108" font-family="Georgia,serif" font-size="13" fill="white" text-anchor="middle" font-weight="bold">${n}</text>${body}<text x="100" y="262" font-family="Georgia,serif" font-size="9" fill="rgba(255,255,255,0.35)" text-anchor="middle">TOKEN</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="280" viewBox="0 0 200 280">${defs}<rect width="200" height="280" rx="10" fill="${bgFill}" stroke="${bdC}" stroke-width="3"/><rect x="8" y="8" width="184" height="264" rx="7" fill="none" stroke="${bdC}" stroke-width="1" opacity="0.5"/><text x="100" y="108" font-family="Georgia,serif" font-size="13" fill="white" text-anchor="middle" font-weight="bold">${n}</text>${body}<text x="100" y="262" font-family="Georgia,serif" font-size="9" fill="rgba(255,255,255,0.35)" text-anchor="middle">TOKEN</text></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
@@ -2679,58 +2731,58 @@ const TOKEN_COLOR_SWATCHES: Record<TokenColor, string> = {
   white: '#cfc08a', blue: '#4a7eb5', black: '#7a4ab4', red: '#c44a4a', green: '#4a9a5a', colorless: '#7a7a8a',
 };
 
-const TOKEN_PRESETS: { name: string; power: string; toughness: string; color: TokenColor; typeLine: string; oracleText?: string; kind: 'creature' | 'artifact' }[] = [
+const TOKEN_PRESETS: { name: string; power: string; toughness: string; colors: TokenColor[]; typeLine: string; oracleText?: string; kind: 'creature' | 'artifact' }[] = [
   // ── Green creatures
-  { kind: 'creature', name: 'Saproling',  power: '1', toughness: '1', color: 'green',     typeLine: 'Token Creature — Saproling' },
-  { kind: 'creature', name: 'Elf',        power: '1', toughness: '1', color: 'green',     typeLine: 'Token Creature — Elf' },
-  { kind: 'creature', name: 'Snake',      power: '1', toughness: '1', color: 'green',     typeLine: 'Token Creature — Snake' },
-  { kind: 'creature', name: 'Bear',       power: '2', toughness: '2', color: 'green',     typeLine: 'Token Creature — Bear' },
-  { kind: 'creature', name: 'Wolf',       power: '2', toughness: '2', color: 'green',     typeLine: 'Token Creature — Wolf' },
-  { kind: 'creature', name: 'Beast',      power: '3', toughness: '3', color: 'green',     typeLine: 'Token Creature — Beast' },
-  { kind: 'creature', name: 'Elephant',   power: '3', toughness: '3', color: 'green',     typeLine: 'Token Creature — Elephant' },
-  { kind: 'creature', name: 'Elemental',  power: '4', toughness: '4', color: 'green',     typeLine: 'Token Creature — Elemental' },
-  { kind: 'creature', name: 'Wurm',       power: '5', toughness: '5', color: 'green',     typeLine: 'Token Creature — Wurm' },
-  { kind: 'creature', name: 'Wurm',       power: '6', toughness: '6', color: 'green',     typeLine: 'Token Creature — Wurm' },
+  { kind: 'creature', name: 'Saproling',  power: '1', toughness: '1', colors: ['green'],     typeLine: 'Token Creature — Saproling' },
+  { kind: 'creature', name: 'Elf',        power: '1', toughness: '1', colors: ['green'],     typeLine: 'Token Creature — Elf' },
+  { kind: 'creature', name: 'Snake',      power: '1', toughness: '1', colors: ['green'],     typeLine: 'Token Creature — Snake' },
+  { kind: 'creature', name: 'Bear',       power: '2', toughness: '2', colors: ['green'],     typeLine: 'Token Creature — Bear' },
+  { kind: 'creature', name: 'Wolf',       power: '2', toughness: '2', colors: ['green'],     typeLine: 'Token Creature — Wolf' },
+  { kind: 'creature', name: 'Beast',      power: '3', toughness: '3', colors: ['green'],     typeLine: 'Token Creature — Beast' },
+  { kind: 'creature', name: 'Elephant',   power: '3', toughness: '3', colors: ['green'],     typeLine: 'Token Creature — Elephant' },
+  { kind: 'creature', name: 'Elemental',  power: '4', toughness: '4', colors: ['green'],     typeLine: 'Token Creature — Elemental' },
+  { kind: 'creature', name: 'Wurm',       power: '5', toughness: '5', colors: ['green'],     typeLine: 'Token Creature — Wurm' },
+  { kind: 'creature', name: 'Wurm',       power: '6', toughness: '6', colors: ['green'],     typeLine: 'Token Creature — Wurm' },
   // ── White creatures
-  { kind: 'creature', name: 'Human',      power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Human' },
-  { kind: 'creature', name: 'Cat',        power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Cat' },
-  { kind: 'creature', name: 'Soldier',    power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Soldier' },
-  { kind: 'creature', name: 'Spirit',     power: '1', toughness: '1', color: 'white',     typeLine: 'Token Creature — Spirit (Flying)' },
-  { kind: 'creature', name: 'Egg',        power: '0', toughness: '1', color: 'white',     typeLine: 'Token Creature — Egg' },
-  { kind: 'creature', name: 'Knight',     power: '2', toughness: '2', color: 'white',     typeLine: 'Token Creature — Knight (Vigilance)' },
-  { kind: 'creature', name: 'Angel',      power: '3', toughness: '3', color: 'white',     typeLine: 'Token Creature — Angel (Flying, Vigilance)' },
+  { kind: 'creature', name: 'Human',      power: '1', toughness: '1', colors: ['white'],     typeLine: 'Token Creature — Human' },
+  { kind: 'creature', name: 'Cat',        power: '1', toughness: '1', colors: ['white'],     typeLine: 'Token Creature — Cat' },
+  { kind: 'creature', name: 'Soldier',    power: '1', toughness: '1', colors: ['white'],     typeLine: 'Token Creature — Soldier' },
+  { kind: 'creature', name: 'Spirit',     power: '1', toughness: '1', colors: ['white'],     typeLine: 'Token Creature — Spirit (Flying)' },
+  { kind: 'creature', name: 'Egg',        power: '0', toughness: '1', colors: ['white'],     typeLine: 'Token Creature — Egg' },
+  { kind: 'creature', name: 'Knight',     power: '2', toughness: '2', colors: ['white'],     typeLine: 'Token Creature — Knight (Vigilance)' },
+  { kind: 'creature', name: 'Angel',      power: '3', toughness: '3', colors: ['white'],     typeLine: 'Token Creature — Angel (Flying, Vigilance)' },
   // ── Black creatures
-  { kind: 'creature', name: 'Zombie',     power: '1', toughness: '1', color: 'black',     typeLine: 'Token Creature — Zombie' },
-  { kind: 'creature', name: 'Zombie',     power: '2', toughness: '2', color: 'black',     typeLine: 'Token Creature — Zombie' },
-  { kind: 'creature', name: 'Rat',        power: '1', toughness: '1', color: 'black',     typeLine: 'Token Creature — Rat' },
+  { kind: 'creature', name: 'Zombie',     power: '1', toughness: '1', colors: ['black'],     typeLine: 'Token Creature — Zombie' },
+  { kind: 'creature', name: 'Zombie',     power: '2', toughness: '2', colors: ['black'],     typeLine: 'Token Creature — Zombie' },
+  { kind: 'creature', name: 'Rat',        power: '1', toughness: '1', colors: ['black'],     typeLine: 'Token Creature — Rat' },
   // ── Red creatures
-  { kind: 'creature', name: 'Goblin',     power: '1', toughness: '1', color: 'red',       typeLine: 'Token Creature — Goblin' },
-  { kind: 'creature', name: 'Devil',      power: '1', toughness: '1', color: 'red',       typeLine: 'Token Creature — Devil' },
-  { kind: 'creature', name: 'Dragon',     power: '2', toughness: '2', color: 'red',       typeLine: 'Token Creature — Dragon (Flying)' },
-  { kind: 'creature', name: 'Dragon',     power: '4', toughness: '4', color: 'red',       typeLine: 'Token Creature — Dragon (Flying)' },
+  { kind: 'creature', name: 'Goblin',     power: '1', toughness: '1', colors: ['red'],       typeLine: 'Token Creature — Goblin' },
+  { kind: 'creature', name: 'Devil',      power: '1', toughness: '1', colors: ['red'],       typeLine: 'Token Creature — Devil' },
+  { kind: 'creature', name: 'Dragon',     power: '2', toughness: '2', colors: ['red'],       typeLine: 'Token Creature — Dragon (Flying)' },
+  { kind: 'creature', name: 'Dragon',     power: '4', toughness: '4', colors: ['red'],       typeLine: 'Token Creature — Dragon (Flying)' },
   // ── Blue creatures
-  { kind: 'creature', name: 'Bird',       power: '1', toughness: '1', color: 'blue',      typeLine: 'Token Creature — Bird (Flying)' },
-  { kind: 'creature', name: 'Drake',      power: '2', toughness: '2', color: 'blue',      typeLine: 'Token Creature — Drake (Flying)' },
+  { kind: 'creature', name: 'Bird',       power: '1', toughness: '1', colors: ['blue'],      typeLine: 'Token Creature — Bird (Flying)' },
+  { kind: 'creature', name: 'Drake',      power: '2', toughness: '2', colors: ['blue'],      typeLine: 'Token Creature — Drake (Flying)' },
   // ── Colorless artifact creatures
-  { kind: 'creature', name: 'Thopter',    power: '1', toughness: '1', color: 'colorless', typeLine: 'Token Artifact Creature — Thopter (Flying)' },
+  { kind: 'creature', name: 'Thopter',    power: '1', toughness: '1', colors: ['colorless'], typeLine: 'Token Artifact Creature — Thopter (Flying)' },
   // ── Artifact tokens (no P/T)
-  { kind: 'artifact', name: 'Clue',     power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Clue',     oracleText: '2, Sacrifice this artifact: Draw a card.' },
-  { kind: 'artifact', name: 'Treasure', power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Treasure', oracleText: 'T, Sacrifice this artifact: Add one mana of any color.' },
-  { kind: 'artifact', name: 'Food',     power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Food',     oracleText: '2, T, Sacrifice this artifact: You gain 3 life.' },
-  { kind: 'artifact', name: 'Map',      power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Map',      oracleText: '1, T, Sacrifice this artifact: Scry 1.' },
-  { kind: 'artifact', name: 'Shard',    power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Shard',    oracleText: 'T, Sacrifice this artifact: Add one mana of any color. Spend this mana only to cast a colored spell or activate an ability.' },
-  { kind: 'artifact', name: 'Gold',     power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Gold',     oracleText: 'Sacrifice this artifact: Add one mana of any color.' },
-  { kind: 'artifact', name: 'Blood',    power: '', toughness: '', color: 'colorless', typeLine: 'Artifact — Blood',    oracleText: '1, T, Discard a card, Sacrifice this artifact: Draw a card.' },
+  { kind: 'artifact', name: 'Clue',     power: '', toughness: '', colors: ['colorless'], typeLine: 'Artifact — Clue',     oracleText: '2, Sacrifice this artifact: Draw a card.' },
+  { kind: 'artifact', name: 'Treasure', power: '', toughness: '', colors: ['colorless'], typeLine: 'Artifact — Treasure', oracleText: 'T, Sacrifice this artifact: Add one mana of any color.' },
+  { kind: 'artifact', name: 'Food',     power: '', toughness: '', colors: ['colorless'], typeLine: 'Artifact — Food',     oracleText: '2, T, Sacrifice this artifact: You gain 3 life.' },
+  { kind: 'artifact', name: 'Map',      power: '', toughness: '', colors: ['colorless'], typeLine: 'Artifact — Map',      oracleText: '1, T, Sacrifice this artifact: Scry 1.' },
+  { kind: 'artifact', name: 'Shard',    power: '', toughness: '', colors: ['colorless'], typeLine: 'Artifact — Shard',    oracleText: 'T, Sacrifice this artifact: Add one mana of any color. Spend this mana only to cast a colored spell or activate an ability.' },
+  { kind: 'artifact', name: 'Gold',     power: '', toughness: '', colors: ['colorless'], typeLine: 'Artifact — Gold',     oracleText: 'Sacrifice this artifact: Add one mana of any color.' },
+  { kind: 'artifact', name: 'Blood',    power: '', toughness: '', colors: ['colorless'], typeLine: 'Artifact — Blood',    oracleText: '1, T, Discard a card, Sacrifice this artifact: Draw a card.' },
 ];
 
 function TokenCreateModal({ onClose, onCreate }: {
   onClose: () => void;
-  onCreate: (name: string, power: string, toughness: string, color: TokenColor, typeLine: string, oracleText: string) => void;
+  onCreate: (name: string, power: string, toughness: string, colors: TokenColor[], typeLine: string, oracleText: string) => void;
 }) {
   const [name, setName]           = useState('');
   const [power, setPower]         = useState('1');
   const [toughness, setToughness] = useState('1');
-  const [color, setColor]         = useState<TokenColor>('green');
+  const [colors, setColors]       = useState<TokenColor[]>(['green']);
   const [typeLine, setTypeLine]   = useState('Token Creature');
   const [oracleText, setOracleText] = useState('');
   const [qty, setQty]             = useState(1);
@@ -2740,7 +2792,15 @@ function TokenCreateModal({ onClose, onCreate }: {
 
   function applyPreset(p: typeof TOKEN_PRESETS[0]) {
     setName(p.name); setPower(p.power); setToughness(p.toughness);
-    setColor(p.color); setTypeLine(p.typeLine); setOracleText(p.oracleText ?? '');
+    setColors(p.colors); setTypeLine(p.typeLine); setOracleText(p.oracleText ?? '');
+  }
+
+  function toggleColor(c: TokenColor) {
+    setColors(prev =>
+      prev.includes(c)
+        ? prev.length > 1 ? prev.filter(x => x !== c) : prev  // keep at least 1
+        : [...prev, c]
+    );
   }
 
   const presetBtn = (p: typeof TOKEN_PRESETS[0], idx: number) => (
@@ -2808,18 +2868,24 @@ function TokenCreateModal({ onClose, onCreate }: {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>Color</label>
-          <div className="flex gap-2 items-center">
-            {TOKEN_COLORS.map((c) => (
-              <button key={c} onClick={() => setColor(c)} title={c}
-                className="rounded-full transition-transform hover:scale-110 relative flex items-center justify-center shrink-0"
-                style={{ width: 28, height: 28, background: TOKEN_COLOR_SWATCHES[c],
-                  border: color === c ? '2px solid white' : '2px solid transparent',
-                  boxShadow: color === c ? `0 0 8px ${TOKEN_COLOR_SWATCHES[c]}` : 'none' }}>
-                {c === 'colorless' && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)', lineHeight: 1, pointerEvents: 'none' }}>∅</span>}
-              </button>
-            ))}
-            <span className="text-xs ml-1 capitalize" style={{ color: '#6b7280' }}>{color}</span>
+          <label className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.4)' }}>
+            Color <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, color: 'rgba(255,255,255,0.2)' }}>(toggle multiple)</span>
+          </label>
+          <div className="flex gap-2 items-center flex-wrap">
+            {TOKEN_COLORS.map((c) => {
+              const active = colors.includes(c);
+              return (
+                <button key={c} onClick={() => toggleColor(c)} title={c}
+                  className="rounded-full transition-transform hover:scale-110 relative flex items-center justify-center shrink-0"
+                  style={{ width: 28, height: 28, background: TOKEN_COLOR_SWATCHES[c],
+                    border: active ? '2px solid white' : '2px solid transparent',
+                    boxShadow: active ? `0 0 8px ${TOKEN_COLOR_SWATCHES[c]}` : 'none',
+                    opacity: active ? 1 : 0.45 }}>
+                  {c === 'colorless' && <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.85)', lineHeight: 1, pointerEvents: 'none' }}>∅</span>}
+                </button>
+              );
+            })}
+            <span className="text-xs ml-1 capitalize" style={{ color: '#6b7280' }}>{colors.join(', ')}</span>
           </div>
         </div>
 
@@ -2854,7 +2920,7 @@ function TokenCreateModal({ onClose, onCreate }: {
         </div>
 
         <button
-          onClick={() => { if (name.trim()) { for (let i = 0; i < qty; i++) onCreate(name.trim(), power, toughness, color, typeLine, oracleText); onClose(); } }}
+          onClick={() => { if (name.trim()) { for (let i = 0; i < qty; i++) onCreate(name.trim(), power, toughness, colors, typeLine, oracleText); onClose(); } }}
           disabled={!name.trim()}
           className="w-full py-3 rounded-xl font-bold text-sm transition hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
           style={{ background: 'linear-gradient(135deg, #166534, #14532d)',
@@ -3203,13 +3269,11 @@ export default function GameBoardPage() {
     returnCmd:    (id: string) => socket.emit('game:return_commander',      { instanceId: id }),
     castCommander: ()          => socket.emit('game:cast_commander'),
     tutor:        (id: string, to: 'hand' | 'battlefield') => socket.emit('game:tutor', { instanceId: id, to }),
-    createToken:  (name: string, power: string, toughness: string, color: string, typeLine: string, oracleText = '') => {
-      // Creature tokens: omit P/T from the SVG — TokenCard renders the live pill as the sole display.
-      // Non-creature tokens have no P/T anyway; this keeps the SVG clean either way.
+    createToken:  (name: string, power: string, toughness: string, colors: string[], typeLine: string, oracleText = '') => {
       const isCreatureToken = typeLine.includes('Creature');
       const pt = (!isCreatureToken && (power || toughness)) ? `${power}/${toughness}` : '';
-      const imageUri = makeTokenImageUri(name, pt, color, oracleText);
-      socket.emit('game:create_token', { name, power, toughness, color, typeLine, imageUri, oracleText });
+      const imageUri = makeTokenImageUri(name, pt, colors, oracleText);
+      socket.emit('game:create_token', { name, power, toughness, color: colors[0] ?? 'colorless', typeLine, imageUri, oracleText });
     },
     copyCard:       (instanceId: string) => socket.emit('game:copy_card', { instanceId }),
     flipCard:       (instanceId: string) => socket.emit('game:flip_card', { instanceId }),
@@ -3837,8 +3901,8 @@ export default function GameBoardPage() {
       {showTokenModal && (
         <TokenCreateModal
           onClose={() => setShowTokenModal(false)}
-          onCreate={(name, power, toughness, color, typeLine, oracleText) =>
-            emit.createToken(name, power, toughness, color, typeLine, oracleText)
+          onCreate={(name, power, toughness, colors, typeLine, oracleText) =>
+            emit.createToken(name, power, toughness, colors, typeLine, oracleText)
           }
         />
       )}

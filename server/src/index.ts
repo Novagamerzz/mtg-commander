@@ -823,8 +823,12 @@ io.on('connection', (socket) => {
     if (!card.counters) card.counters = {};
 
     // MTG rules: +1/+1 and -1/-1 counters annihilate each other.
-    // When adding one, cancel the opposite instead if any exist.
-    const opposite: Record<string, string> = { '+1/+1': '-1/-1', '-1/-1': '+1/+1' };
+    // P/T-only counters (+1/+0, -1/+0, +0/+1, +0/-1) cancel their own opposites.
+    const opposite: Record<string, string> = {
+      '+1/+1': '-1/-1', '-1/-1': '+1/+1',
+      '+1/+0': '-1/+0', '-1/+0': '+1/+0',
+      '+0/+1': '+0/-1', '+0/-1': '+0/+1',
+    };
     if (delta > 0 && opposite[counter] && (card.counters[opposite[counter]] ?? 0) > 0) {
       const opp = opposite[counter];
       card.counters[opp] = (card.counters[opp] ?? 0) - 1;
@@ -842,14 +846,17 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Creature death — check after every counter change that can affect P/T
+    // Creature death — check after every counter change that can affect toughness
     const isCreature = (card.typeLine ?? '').includes('Creature');
-    if (isCreature && (counter === '+1/+1' || counter === '-1/-1')) {
+    const affectsToughness = counter === '+1/+1' || counter === '-1/-1' || counter === '+0/+1' || counter === '+0/-1';
+    if (isCreature && affectsToughness) {
       const baseTouStr = card.toughnessOverride ?? card.toughness ?? '0';
       const parsedTou = parseInt(baseTouStr, 10);
       // * toughness treated as 1 (same as ETB default) when baseToughness not explicitly set
       const baseTou = card.baseToughness ?? (baseTouStr === '*' ? 1 : (isNaN(parsedTou) ? 1 : parsedTou));
-      const effectiveTou = baseTou + (card.counters?.['+1/+1'] ?? 0) - (card.counters?.['-1/-1'] ?? 0);
+      const effectiveTou = baseTou
+        + (card.counters?.['+1/+1'] ?? 0) - (card.counters?.['-1/-1'] ?? 0)
+        + (card.counters?.['+0/+1'] ?? 0) - (card.counters?.['+0/-1'] ?? 0);
       if (effectiveTou <= 0) {
         player.battlefield = player.battlefield.filter(c => c.instanceId !== instanceId);
         player.graveyard.push({ ...card, tapped: false });
