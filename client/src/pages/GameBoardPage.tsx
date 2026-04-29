@@ -1470,6 +1470,77 @@ function ZoneHeader({ player, color, isMonarch }: { player: PersonalPlayerState;
   );
 }
 
+// ── Mana Pool ─────────────────────────────────────────────────────────────────
+
+interface ManaPoolState { W: number; U: number; B: number; R: number; G: number; C: number; any: number; }
+const EMPTY_MANA: ManaPoolState = { W:0, U:0, B:0, R:0, G:0, C:0, any:0 };
+
+const MANA_CFG: Record<keyof ManaPoolState, { label: string; bg: string; text: string }> = {
+  W:   { label: 'W', bg: '#f0ede0', text: '#44380a' },
+  U:   { label: 'U', bg: '#0e68ab', text: '#fff' },
+  B:   { label: 'B', bg: '#1a1108', text: '#bbb' },
+  R:   { label: 'R', bg: '#d3202a', text: '#fff' },
+  G:   { label: 'G', bg: '#00733e', text: '#fff' },
+  C:   { label: '◇', bg: '#888',    text: '#fff' },
+  any: { label: '◈', bg: '#c9a84c', text: '#000' },
+};
+
+function parseManaFromOracleText(oracleText: string): ManaPoolState {
+  const pool: ManaPoolState = { ...EMPTY_MANA };
+  // Colorless: {C}{C} before {C} to avoid double-counting
+  if (/add \{C\}\{C\}/i.test(oracleText)) pool.C += 2;
+  else if (/add \{C\}/i.test(oracleText)) pool.C++;
+  // Any color
+  if (/add one mana of any color/i.test(oracleText)) pool.any++;
+  // Colored mana: line-by-line to handle "Add {U}{B}" multi-symbol on one tap
+  for (const line of oracleText.split('\n')) {
+    if (!/\badd\b/i.test(line) || /any color/i.test(line)) continue;
+    for (const m of line.matchAll(/\{([WUBRG])\}/gi)) {
+      (pool[m[1].toUpperCase() as keyof ManaPoolState] as number)++;
+    }
+  }
+  return pool;
+}
+
+function ManaPoolTracker({ pool, onAdjust }: { pool: ManaPoolState; onAdjust: (color: keyof ManaPoolState, delta: number) => void }) {
+  const COLORS = Object.keys(MANA_CFG) as (keyof ManaPoolState)[];
+  const btnS: React.CSSProperties = {
+    width: 14, height: 14, borderRadius: 3, border: 'none', cursor: 'pointer', padding: 0,
+    fontSize: 10, background: 'rgba(255,255,255,0.07)', color: '#9ca3af',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  };
+  return (
+    <div style={{
+      position: 'fixed', bottom: 10, left: '50%', transform: 'translateX(-50%)',
+      zIndex: 150, display: 'flex', alignItems: 'center', gap: 3,
+      background: 'rgba(6,9,18,0.92)', backdropFilter: 'blur(8px)',
+      border: '1px solid rgba(255,255,255,0.09)', borderRadius: 20,
+      padding: '4px 10px', boxShadow: '0 4px 16px rgba(0,0,0,0.7)',
+    }}>
+      <span style={{ fontSize: 8, color: '#4b5563', fontWeight: 700, letterSpacing: 0.5, marginRight: 2 }}>MANA</span>
+      {COLORS.map(color => {
+        const cfg = MANA_CFG[color];
+        const count = pool[color];
+        return (
+          <div key={color} style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <button style={{ ...btnS, opacity: count > 0 ? 1 : 0.4 }} onClick={() => onAdjust(color, -1)}>−</button>
+            <div style={{
+              background: cfg.bg, color: cfg.text, borderRadius: 10, minWidth: 20, height: 20,
+              padding: '0 4px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 9, fontWeight: 800, whiteSpace: 'nowrap',
+              border: `1px solid rgba(0,0,0,${color === 'W' ? '0.15' : '0.4'})`,
+              opacity: count > 0 ? 1 : 0.22,
+            }}>
+              {cfg.label}{count > 0 ? count : ''}
+            </div>
+            <button style={btnS} onClick={() => onAdjust(color, 1)}>+</button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Combat utility ───────────────────────────────────────────────────────────
 
 function effectivePT(basePow: string | null, baseTou: string | null, counters: Record<string, number> = {}) {
@@ -3052,6 +3123,8 @@ export default function GameBoardPage() {
   const [blockerAssignments, setBlockerAssignments] = useState<Map<string, string>>(new Map());
   const [showCombatResults, setShowCombatResults] = useState(false);
   const [timingToast, setTimingToast] = useState<string | null>(null);
+  const [manaPool, setManaPool] = useState<ManaPoolState>(EMPTY_MANA);
+  const [manaFromCard, setManaFromCard] = useState<Record<string, ManaPoolState>>({});
   const [overHand, setOverHand] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [announcement, setAnnouncement] = useState<string | null>(null);
@@ -3206,6 +3279,17 @@ export default function GameBoardPage() {
     }
   }, [gameState]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-clear mana pool at end step
+  useEffect(() => {
+    if (gameState?.phase === 'end') {
+      setManaPool(EMPTY_MANA);
+      setManaFromCard({});
+      setTimingToast('🌊 Mana pool emptied');
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setTimingToast(null), 2500);
+    }
+  }, [gameState?.phase]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Clear combat selection when leaving combat sub-steps
   useEffect(() => {
     const phase = gameState?.phase;
@@ -3225,7 +3309,7 @@ export default function GameBoardPage() {
       const card = myBattlefieldRef.current.find(c => c.instanceId === id);
       const isCmd = !!card && !!commanderScryfallId.current && card.scryfallId === commanderScryfallId.current;
       const k = e.key;
-      if (k === 't' || k === 'T') { socket.emit('game:tap_card', { instanceId: id }); return; }
+      if (k === 't' || k === 'T') { handleTapCard(id); return; }
       if (k === 'g' || k === 'G') {
         if (isCmd) setCommanderPopup({ cardName: card.name, instanceId: id, destination: 'graveyard' });
         else socket.emit('game:move_to_graveyard', { instanceId: id });
@@ -3387,6 +3471,46 @@ export default function GameBoardPage() {
     setKeywords:         (instanceId: string, keywords: string[]) => socket.emit('game:set_keywords', { instanceId, keywords }),
     setLandsPlayable:    (delta: number) => socket.emit('game:set_lands_playable', { delta }),
   };
+
+  // ── Mana pool helpers ─────────────────────────────────────────────────────────
+
+  function adjustMana(color: keyof ManaPoolState, delta: number) {
+    setManaPool(prev => ({ ...prev, [color]: Math.max(0, prev[color] + delta) }));
+  }
+
+  function handleTapCard(instanceId: string) {
+    const card = myBattlefieldRef.current.find(c => c.instanceId === instanceId);
+    if (card) {
+      const oracle = card.oracleText ?? '';
+      if (/\badd\b/i.test(oracle)) {
+        if (card.tapped) {
+          // Untapping — remove mana that was added when this card was tapped
+          const produced = manaFromCard[instanceId];
+          if (produced) {
+            setManaPool(prev => ({
+              W: Math.max(0, prev.W - produced.W), U: Math.max(0, prev.U - produced.U),
+              B: Math.max(0, prev.B - produced.B), R: Math.max(0, prev.R - produced.R),
+              G: Math.max(0, prev.G - produced.G), C: Math.max(0, prev.C - produced.C),
+              any: Math.max(0, prev.any - produced.any),
+            }));
+            setManaFromCard(prev => { const n = { ...prev }; delete n[instanceId]; return n; });
+          }
+        } else {
+          // Tapping — add mana from this card
+          const produced = parseManaFromOracleText(oracle);
+          if (Object.values(produced).some(v => v > 0)) {
+            setManaPool(prev => ({
+              W: prev.W + produced.W, U: prev.U + produced.U, B: prev.B + produced.B,
+              R: prev.R + produced.R, G: prev.G + produced.G, C: prev.C + produced.C,
+              any: prev.any + produced.any,
+            }));
+            setManaFromCard(prev => ({ ...prev, [instanceId]: produced }));
+          }
+        }
+      }
+    }
+    emit.tapCard(instanceId);
+  }
 
   // ── Combat helpers ────────────────────────────────────────────────────────────
 
@@ -3615,7 +3739,7 @@ export default function GameBoardPage() {
           isMyTurn={isMyTurn}
           myUserId={user?.id ?? ''}
           onToggleAttacker={(id) => setSelectedAttackers(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
-          onTapCard={emit.tapCard}
+          onTapCard={handleTapCard}
           onGraveyardCard={interceptGraveyard}
           onExileCard={interceptExile}
           onReturnCmdCard={emit.returnCmd}
@@ -3959,6 +4083,9 @@ export default function GameBoardPage() {
           )}
         </div>
       )}
+
+      {/* ── Mana pool tracker ── */}
+      <ManaPoolTracker pool={manaPool} onAdjust={adjustMana} />
 
       {/* ── Timing error toast ── */}
       {timingToast && (

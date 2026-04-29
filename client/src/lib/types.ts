@@ -39,6 +39,7 @@ export interface GameCard {
   basePower?: number;
   baseToughness?: number;
   keywords?: string[];
+  oracleText?: string;
 }
 
 export interface DeckCardData {
