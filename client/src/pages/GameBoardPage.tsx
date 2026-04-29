@@ -1434,16 +1434,23 @@ function ZoneHeader({ player, color, isMonarch }: { player: PersonalPlayerState;
     <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: OPP_INFO_H,
       background: 'rgba(0,0,0,0.72)', borderRadius: '12px 12px 0 0',
       borderBottom: `1px solid ${color}50`,
-      display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px',
-      zIndex: 2 }}>
+      display: 'flex', alignItems: 'center', justifyContent: 'flex-start',
+      gap: 10, padding: '0 16px', zIndex: 2 }}>
       {player.isActive && (
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#facc15',
           boxShadow: '0 0 8px #facc15', flexShrink: 0, display: 'inline-block' }} />
       )}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
+      {/* Life total */}
+      <span style={{ fontSize: 34, fontWeight: 900, fontFamily: 'monospace', lineHeight: 1,
+        color: lifeColor, flexShrink: 0,
+        textShadow: life <= 10 ? `0 0 14px ${lifeColor}` : '0 2px 4px rgba(0,0,0,0.8)' }}>
+        {life}
+      </span>
+      {/* Name + commander */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, flexShrink: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           {isMonarch && <span style={{ fontSize: 14, lineHeight: 1 }} title="Monarch">👑</span>}
-          <span style={{ fontWeight: 800, fontSize: 15, color: '#f1f5f9', lineHeight: 1.1 }}>{player.playerName}</span>
+          <span style={{ fontWeight: 800, fontSize: 15, color: '#f1f5f9', lineHeight: 1.1, whiteSpace: 'nowrap' }}>{player.playerName}</span>
         </div>
         {commander && (
           <span style={{ fontSize: 11, color: '#fbbf24', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1451,18 +1458,14 @@ function ZoneHeader({ player, color, isMonarch }: { player: PersonalPlayerState;
           </span>
         )}
       </div>
-      <div style={{ display: 'flex', gap: 10, fontSize: 12, color: '#94a3b8', flexShrink: 0, fontWeight: 600 }}>
+      {/* Hand / library / poison */}
+      <div style={{ display: 'flex', gap: 8, fontSize: 12, color: '#94a3b8', flexShrink: 0, fontWeight: 600 }}>
         <span title="Hand">✋ {player.handCount}</span>
         <span title="Library">📚 {player.libraryCount}</span>
         {player.poisonCounters > 0 && (
           <span title="Poison" style={{ color: '#a3e635' }}>☠️ {player.poisonCounters}</span>
         )}
       </div>
-      <span style={{ fontSize: 34, fontWeight: 900, fontFamily: 'monospace', lineHeight: 1,
-        color: lifeColor, flexShrink: 0,
-        textShadow: life <= 10 ? `0 0 14px ${lifeColor}` : '0 2px 4px rgba(0,0,0,0.8)' }}>
-        {life}
-      </span>
     </div>
   );
 }
