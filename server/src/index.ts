@@ -170,7 +170,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
         targetUserId: a.targetUserId, targetPlayerName: tgtP?.playerName ?? '?',
         attackerPower: card?.power ?? null, attackerToughness: card?.toughness ?? null,
         attackerCounters: card?.counters ?? {}, attackerIsCommander: card?.isCommander ?? false,
-        attackerKeywords: card?.keywords ?? [],
+        attackerKeywords: cardKeywords(card),
       };
     }),
     blocks: game.combatState.blocks.map(b => {
@@ -182,7 +182,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
         defendingUserId: b.defendingUserId, defendingPlayerName: defP?.playerName ?? '?',
         blockerPower: card?.power ?? null, blockerToughness: card?.toughness ?? null,
         blockerCounters: card?.counters ?? {}, blockerIsCommander: card?.isCommander ?? false,
-        blockerKeywords: card?.keywords ?? [],
+        blockerKeywords: cardKeywords(card),
       };
     }),
   } : null;
@@ -323,6 +323,30 @@ function createGame(room: InternalRoom): InternalGame {
 }
 
 const PHASE_ORDER: TurnPhase[] = ['untap', 'upkeep', 'draw', 'main1', 'begin_combat', 'declare_attackers', 'declare_blockers', 'damage', 'end_combat', 'main2', 'end'];
+
+const KNOWN_KEYWORDS = [
+  'Flying', 'Trample', 'Vigilance', 'Deathtouch', 'Lifelink', 'Indestructible',
+  'First Strike', 'Double Strike', 'Menace', 'Reach', 'Haste', 'Hexproof', 'Flash',
+];
+
+// Mutates card.keywords to include any combat keywords found in oracle text that are missing from the array.
+function enrichKeywordsFromOracle(card: InternalCard): void {
+  const text = (card.oracleText ?? '').toLowerCase();
+  if (!text) return;
+  const existing = new Set((card.keywords ?? []).map(k => k.toLowerCase()));
+  const added = KNOWN_KEYWORDS.filter(kw => !existing.has(kw.toLowerCase()) && text.includes(kw.toLowerCase()));
+  if (added.length > 0) card.keywords = [...(card.keywords ?? []), ...added];
+}
+
+// Returns keywords merged from both the keywords array and oracle text (non-mutating).
+function cardKeywords(card: InternalCard | undefined): string[] {
+  if (!card) return [];
+  const text = (card.oracleText ?? '').toLowerCase();
+  if (!text) return card.keywords ?? [];
+  const existing = new Set((card.keywords ?? []).map(k => k.toLowerCase()));
+  const extras = KNOWN_KEYWORDS.filter(kw => !existing.has(kw.toLowerCase()) && text.includes(kw.toLowerCase()));
+  return extras.length > 0 ? [...(card.keywords ?? []), ...extras] : (card.keywords ?? []);
+}
 
 function advancePhase(game: InternalGame) {
   const idx = PHASE_ORDER.indexOf(game.phase);
@@ -618,6 +642,8 @@ io.on('connection', (socket) => {
     const played = moveCard(player.hand, player.battlefield, instanceId);
     if (!played) return;
 
+    enrichKeywordsFromOracle(played);
+
     // * P/T creatures must enter as 1/1 so they survive the toughness death check
     if (played.power === '*' || played.toughness === '*') {
       if (played.basePower    === undefined) played.basePower    = 1;
@@ -764,6 +790,7 @@ io.on('connection', (socket) => {
     }
 
     const [castCard] = player.commandZone.splice(0, 1);
+    enrichKeywordsFromOracle(castCard);
     player.battlefield.push(castCard);
     const commander_ref = castCard; // alias for log below
     const prev = player.commanderCastCount;
@@ -795,6 +822,7 @@ io.on('connection', (socket) => {
     for (const zone of [player.graveyard, player.exile]) {
       const card = moveCard(zone, player.battlefield, instanceId);
       if (card) {
+        enrichKeywordsFromOracle(card);
         if (card.power === '*' || card.toughness === '*') {
           if (card.basePower    === undefined) card.basePower    = 1;
           if (card.baseToughness === undefined) card.baseToughness = 1;
@@ -1003,6 +1031,7 @@ io.on('connection', (socket) => {
       player.hand.push(card);
       appendLog(game, `${player.playerName} tutored ${card.name} → hand`);
     } else {
+      enrichKeywordsFromOracle(card);
       player.battlefield.push(card);
       appendLog(game, `${player.playerName} put ${card.name} onto the battlefield`);
     }
@@ -1220,7 +1249,7 @@ io.on('connection', (socket) => {
     // Tap all attacking creatures (Vigilance: skip tapping)
     for (const atk of attacks) {
       const card = player.battlefield.find(c => c.instanceId === atk.attackerId);
-      if (card && !(card.keywords ?? []).includes('Vigilance')) card.tapped = true;
+      if (card && !cardKeywords(card).includes('Vigilance')) card.tapped = true;
     }
     game.combatState = {
       attacks: attacks.map(a => ({ attackerId: a.attackerId, attackingUserId: player.userId, targetUserId: a.targetUserId })),
