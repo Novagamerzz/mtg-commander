@@ -83,6 +83,7 @@ export interface PersonalPlayerState {
   socketId: string;
   userId: string;
   playerName: string;
+  seatIndex: number;
   life: number;
   commanderDamage: Record<string, number>;
   poisonCounters: number;

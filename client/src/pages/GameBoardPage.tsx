@@ -1324,16 +1324,18 @@ function tableLayout(opCount: number): { my: ZoneRect; ops: ZoneRect[] } {
       ],
     };
   }
-  // 3 opponents: 4-player quadrant layout
-  // Me=bottom-left  Op0=bottom-right  Op1=top-left  Op2=top-right
-  const hw = Math.floor((PW - 20) / 2);
-  const hh = Math.floor((CANVAS_H - 40 - GAP) / 2);
+  // 3 opponents: 4-player layout — full-width top/bottom + side panels
+  // ops[0]=right (relSeat 1), ops[1]=top (relSeat 2), ops[2]=left (relSeat 3)
+  const H_ZONE_H = 650;
+  const SIDE_W = 900;
+  const SIDE_H = CANVAS_H - 40 - H_ZONE_H * 2 - GAP * 2; // 540
+  const sideY = 20 + H_ZONE_H + GAP;
   return {
-    my:  { x: 20,        y: 20 + hh + GAP, w: hw, h: hh },
+    my:  { x: 20, y: sideY + SIDE_H + GAP, w: PW, h: H_ZONE_H },
     ops: [
-      { x: 20 + hw + 20, y: 20 + hh + GAP, w: hw, h: hh }, // bottom-right
-      { x: 20,           y: 20,             w: hw, h: hh }, // top-left
-      { x: 20 + hw + 20, y: 20,             w: hw, h: hh }, // top-right
+      { x: 20 + PW - SIDE_W, y: sideY, w: SIDE_W, h: SIDE_H }, // right
+      { x: 20,               y: 20,    w: PW,      h: H_ZONE_H }, // top
+      { x: 20,               y: sideY, w: SIDE_W,  h: SIDE_H }, // left
     ],
   };
 }
@@ -2209,7 +2211,14 @@ function TableCanvas({
   camRef.current = { zoom, pan };
 
   const activeOpponents = opponents.filter((p) => !p.eliminated);
-  const layout = tableLayout(activeOpponents.length);
+  // Sort opponents by relative seat so op[0]=clockwise-next (right), op[1]=opposite (top), op[2]=counter-clockwise (left)
+  const totalPlayers = opponents.length + 1;
+  const sortedActiveOpponents = [...activeOpponents].sort((a, b) => {
+    const relA = (a.seatIndex - me.seatIndex + totalPlayers) % totalPlayers;
+    const relB = (b.seatIndex - me.seatIndex + totalPlayers) % totalPlayers;
+    return relA - relB;
+  });
+  const layout = tableLayout(sortedActiveOpponents.length);
   const myColor = ZONE_COLORS[0];
   const MIN_ZOOM = 0.3;
   const MAX_ZOOM = 2.0;
@@ -2219,7 +2228,7 @@ function TableCanvas({
     const el = viewportRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const lay  = tableLayout(activeOpponents.length);
+    const lay  = tableLayout(sortedActiveOpponents.length);
     const z    = 0.7;
     const cx   = lay.my.x + lay.my.w / 2;
     const cy   = lay.my.y + lay.my.h / 2;
@@ -2275,7 +2284,7 @@ function TableCanvas({
     const el = viewportRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const lay  = tableLayout(activeOpponents.length);
+    const lay  = tableLayout(sortedActiveOpponents.length);
     const z    = 0.7;
     const cx   = lay.my.x + lay.my.w / 2;
     const cy   = lay.my.y + lay.my.h / 2;
@@ -2305,7 +2314,7 @@ function TableCanvas({
       }}>
 
         {/* Opponent zones */}
-        {activeOpponents.map((player, i) => {
+        {sortedActiveOpponents.map((player, i) => {
           const zone = layout.ops[i];
           if (!zone) return null;
           const color = ZONE_COLORS[(i + 1) % ZONE_COLORS.length];

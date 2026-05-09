@@ -44,6 +44,7 @@ interface InternalCard {
 
 interface InternalPlayer {
   socketId: string; userId: string; playerName: string;
+  seatIndex: number;
   life: number;
   commanderDamage: Record<string, number>;
   poisonCounters: number;
@@ -83,6 +84,7 @@ interface InternalGame {
 
 interface InternalRoomPlayer {
   socketId: string; userId: string; playerName: string;
+  seatIndex: number;
   deckId: string | null; deckName: string | null;
   deckCards: {
     scryfallId: string; cardName: string; imageUri: string;
@@ -203,6 +205,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
       socketId: p.socketId,
       userId: p.userId,
       playerName: p.playerName,
+      seatIndex: p.seatIndex,
       life: p.life,
       commanderDamage: p.commanderDamage,
       poisonCounters: p.poisonCounters,
@@ -288,6 +291,7 @@ function createGame(room: InternalRoom): InternalGame {
       socketId: rp.socketId,
       userId: rp.userId,
       playerName: rp.playerName,
+      seatIndex: rp.seatIndex,
       life: 40,
       commanderDamage,
       poisonCounters: 0,
@@ -464,7 +468,7 @@ io.on('connection', (socket) => {
       id: roomId,
       hostSocketId: socket.id,
       hostName: playerName,
-      players: [{ socketId: socket.id, userId, playerName, deckId: null, deckName: null, deckCards: [] }],
+      players: [{ socketId: socket.id, userId, playerName, seatIndex: 0, deckId: null, deckName: null, deckCards: [] }],
       status: 'waiting',
       createdAt: Date.now(),
       password: password?.trim() || undefined,
@@ -493,7 +497,7 @@ io.on('connection', (socket) => {
       socket.emit('room:updated', toPublicRoom(room));
       return;
     }
-    room.players.push({ socketId: socket.id, userId, playerName, deckId: null, deckName: null, deckCards: [] });
+    room.players.push({ socketId: socket.id, userId, playerName, seatIndex: room.players.length, deckId: null, deckName: null, deckCards: [] });
     socketToRoom.set(socket.id, roomId);
     userIdToRoom.set(userId, roomId);
     socket.leave('lobby');
