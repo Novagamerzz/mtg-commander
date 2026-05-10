@@ -2318,8 +2318,14 @@ function TableCanvas({
           const zone = layout.ops[i];
           if (!zone) return null;
           const color = ZONE_COLORS[(i + 1) % ZONE_COLORS.length];
-          // Zones above my zone (y < layout.my.y) are "top" zones — use mirrored row order
-          const rows = buildCRows(player.battlefield, TYPE_ROWS_OPP, zone.w, cardSize);
+          // Determine mat position: for 4-player (3 ops) sorted order is [right, top, left].
+          // right uses TYPE_ROWS so creatures appear at top = inner/left edge.
+          // top and left use TYPE_ROWS_OPP so creatures appear at bottom = inner edge.
+          const matPos = sortedActiveOpponents.length === 3
+            ? (i === 0 ? 'right' : i === 1 ? 'top' : 'left')
+            : 'top';
+          const oppRowDefs = matPos === 'right' ? TYPE_ROWS : TYPE_ROWS_OPP;
+          const rows = buildCRows(player.battlefield, oppRowDefs, zone.w, cardSize);
           const cardMap = new Map<string, GameCard>(player.battlefield.map(c => [c.instanceId as string, c as GameCard]));
 
           return (
