@@ -87,6 +87,7 @@ export default function GameRoomPage() {
     const typeLineMap  = new Map(scryfallData.map((c) => [c.id, c.type_line ?? '']));
     const powerMap     = new Map(scryfallData.map((c) => [c.id, c.power ?? undefined]));
     const toughnessMap = new Map(scryfallData.map((c) => [c.id, c.toughness ?? undefined]));
+    const loyaltyMap   = new Map(scryfallData.map((c) => [c.id, c.loyalty ?? undefined]));
 
     const deckCards: DeckCardData[] = cards.map((c) => ({
       scryfallId: c.scryfall_id,
@@ -96,6 +97,7 @@ export default function GameRoomPage() {
       oracleText: oracleMap.get(c.scryfall_id) ?? '',
       power:     powerMap.get(c.scryfall_id),
       toughness: toughnessMap.get(c.scryfall_id),
+      loyalty:   loyaltyMap.get(c.scryfall_id),
       quantity: c.quantity ?? 1,
       isCommander: c.is_commander ?? false,
     }));

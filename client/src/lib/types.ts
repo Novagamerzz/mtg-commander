@@ -50,6 +50,7 @@ export interface DeckCardData {
   oracleText: string;
   power?: string;
   toughness?: string;
+  loyalty?: string;
   quantity: number;
   isCommander: boolean;
 }
@@ -110,6 +111,8 @@ export interface CombatAttackEntry {
   attackerPower: string | null; attackerToughness: string | null;
   attackerCounters: Record<string, number>; attackerIsCommander: boolean;
   attackerKeywords: string[];
+  targetPlaneswalkerInstanceId?: string;
+  targetPlaneswalkerName?: string;
 }
 export interface CombatBlockEntry {
   blockerId: string; blockerName: string; blockerImage: string;
@@ -210,8 +213,8 @@ export interface ClientToServerEvents {
   'game:join': (payload: { gameId: string; playerName: string }) => void;
   'player:update_life': (payload: { delta: number }) => void;
   'chat:send': (message: string) => void;
-  'game:declare_attackers': (payload: { attacks: { attackerId: string; targetUserId: string }[] }) => void;
+  'game:declare_attackers': (payload: { attacks: { attackerId: string; targetUserId: string; targetPlaneswalkerInstanceId?: string }[] }) => void;
   'game:declare_blockers': (payload: { blocks: { blockerId: string; blockingAttackerId: string }[] }) => void;
-  'game:resolve_combat': (payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[]; lifeGain?: { userId: string; amount: number }[] }) => void;
+  'game:resolve_combat': (payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[]; lifeGain?: { userId: string; amount: number }[]; loyaltyDamage?: { targetInstanceId: string; amount: number }[] }) => void;
   'game:combat_back': () => void;
 }

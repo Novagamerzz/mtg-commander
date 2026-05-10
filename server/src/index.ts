@@ -31,6 +31,7 @@ interface InternalCard {
   instanceId: string; scryfallId: string;
   name: string; imageUri: string; typeLine: string; oracleText: string; tapped: boolean;
   power?: string; toughness?: string;
+  loyalty?: string;
   faceDown?: boolean;
   counters?: Record<string, number>;
   powerOverride?: string | null;
@@ -64,7 +65,7 @@ interface InternalPlayer {
 }
 
 interface InternalCombatState {
-  attacks: { attackerId: string; attackingUserId: string; targetUserId: string }[];
+  attacks: { attackerId: string; attackingUserId: string; targetUserId: string; targetPlaneswalkerInstanceId?: string }[];
   blocks: { blockerId: string; blockingAttackerId: string; defendingUserId: string }[];
 }
 
@@ -88,7 +89,7 @@ interface InternalRoomPlayer {
   deckId: string | null; deckName: string | null;
   deckCards: {
     scryfallId: string; cardName: string; imageUri: string;
-    typeLine: string; oracleText: string; power?: string; toughness?: string; quantity: number; isCommander: boolean;
+    typeLine: string; oracleText: string; power?: string; toughness?: string; loyalty?: string; quantity: number; isCommander: boolean;
   }[];
 }
 
@@ -166,6 +167,7 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
       const card = allBf.find(c => c.instanceId === a.attackerId);
       const attP = game.players.find(p => p.userId === a.attackingUserId);
       const tgtP = game.players.find(p => p.userId === a.targetUserId);
+      const pwCard = a.targetPlaneswalkerInstanceId ? allBf.find(c => c.instanceId === a.targetPlaneswalkerInstanceId) : undefined;
       return {
         attackerId: a.attackerId, attackerName: card?.name ?? '?', attackerImage: card?.imageUri ?? '',
         attackingUserId: a.attackingUserId, attackingPlayerName: attP?.playerName ?? '?',
@@ -173,6 +175,8 @@ function toPersonalState(game: InternalGame, mySocketId: string): PersonalGameSt
         attackerPower: card?.power ?? null, attackerToughness: card?.toughness ?? null,
         attackerCounters: card?.counters ?? {}, attackerIsCommander: card?.isCommander ?? false,
         attackerKeywords: cardKeywords(card),
+        targetPlaneswalkerInstanceId: a.targetPlaneswalkerInstanceId,
+        targetPlaneswalkerName: pwCard?.name,
       };
     }),
     blocks: game.combatState.blocks.map(b => {
@@ -261,6 +265,7 @@ function createGame(room: InternalRoom): InternalGame {
           tapped: false,
           power: dc.power,
           toughness: dc.toughness,
+          loyalty: dc.loyalty,
         }))
       )
     );
@@ -335,6 +340,7 @@ const KNOWN_KEYWORDS = [
 
 // Mutates card.keywords to include any combat keywords found in oracle text that are missing from the array.
 function enrichKeywordsFromOracle(card: InternalCard): void {
+  if ((card.typeLine ?? '').includes('Planeswalker')) return;
   const text = (card.oracleText ?? '').toLowerCase();
   if (!text) return;
   const existing = new Set((card.keywords ?? []).map(k => k.toLowerCase()));
@@ -345,6 +351,7 @@ function enrichKeywordsFromOracle(card: InternalCard): void {
 // Returns keywords merged from both the keywords array and oracle text (non-mutating).
 function cardKeywords(card: InternalCard | undefined): string[] {
   if (!card) return [];
+  if ((card.typeLine ?? '').includes('Planeswalker')) return card.keywords ?? [];
   const text = (card.oracleText ?? '').toLowerCase();
   if (!text) return card.keywords ?? [];
   const existing = new Set((card.keywords ?? []).map(k => k.toLowerCase()));
@@ -648,6 +655,12 @@ io.on('connection', (socket) => {
 
     enrichKeywordsFromOracle(played);
 
+    if (played.typeLine.includes('Planeswalker')) {
+      const loyaltyN = parseInt(played.loyalty ?? '') || 3;
+      if (!played.counters) played.counters = {};
+      if (!played.counters['loyalty']) played.counters['loyalty'] = loyaltyN;
+    }
+
     // * P/T creatures must enter as 1/1 so they survive the toughness death check
     if (played.power === '*' || played.toughness === '*') {
       if (played.basePower    === undefined) played.basePower    = 1;
@@ -878,6 +891,20 @@ io.on('connection', (socket) => {
       appendLog(game, `${player.playerName}: ${card.name} token used (removed)`);
       broadcastGame(game);
       return;
+    }
+
+    // Planeswalker loyalty death — check after loyalty counter change
+    const isPlaneswalker = (card.typeLine ?? '').includes('Planeswalker');
+    if (isPlaneswalker && counter === 'loyalty') {
+      const loyalty = card.counters?.['loyalty'] ?? 0;
+      if (loyalty <= 0) {
+        player.battlefield = player.battlefield.filter(c => c.instanceId !== instanceId);
+        player.graveyard.push({ ...card, tapped: false, counters: {} });
+        appendLog(game, `${player.playerName}: ${card.name} has no loyalty — sent to graveyard`);
+        io.to(game.roomId).emit('game:announcement', { message: `${card.name} has no loyalty — sent to graveyard`, type: 'info' });
+        broadcastGame(game);
+        return;
+      }
     }
 
     // Creature death — check after every counter change that can affect toughness
@@ -1256,7 +1283,12 @@ io.on('connection', (socket) => {
       if (card && !cardKeywords(card).includes('Vigilance')) card.tapped = true;
     }
     game.combatState = {
-      attacks: attacks.map(a => ({ attackerId: a.attackerId, attackingUserId: player.userId, targetUserId: a.targetUserId })),
+      attacks: attacks.map(a => ({
+        attackerId: a.attackerId,
+        attackingUserId: player.userId,
+        targetUserId: a.targetUserId,
+        targetPlaneswalkerInstanceId: a.targetPlaneswalkerInstanceId,
+      })),
       blocks: [],
     };
     appendLog(game, `${player.playerName} declared ${attacks.length} attacker${attacks.length !== 1 ? 's' : ''}`);
@@ -1320,7 +1352,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('game:resolve_combat', ({ deadToGY, deadToCommandZone, lifeLost, lifeGain }) => {
+  socket.on('game:resolve_combat', ({ deadToGY, deadToCommandZone, lifeLost, lifeGain, loyaltyDamage }) => {
     const game = getGame(socket.id);
     if (!game || game.phase !== 'damage') return;
     const activePlayer = game.players[game.activePlayerIndex];
@@ -1402,6 +1434,27 @@ io.on('connection', (socket) => {
       if (!target || target.eliminated) continue;
       target.life += lg.amount;
       appendLog(game, `${target.playerName}: +${lg.amount} life (Lifelink)`);
+    }
+
+    // Apply loyalty damage to planeswalkers
+    for (const ld of (loyaltyDamage ?? [])) {
+      for (const p of game.players) {
+        const pwCard = p.battlefield.find(c => c.instanceId === ld.targetInstanceId);
+        if (pwCard) {
+          if (!pwCard.counters) pwCard.counters = {};
+          const prev = pwCard.counters['loyalty'] ?? 0;
+          const next = Math.max(0, prev - ld.amount);
+          pwCard.counters['loyalty'] = next;
+          appendLog(game, `${pwCard.name}: −${ld.amount} loyalty combat damage → ${next}`);
+          if (next <= 0) {
+            p.battlefield = p.battlefield.filter(c => c.instanceId !== ld.targetInstanceId);
+            p.graveyard.push({ ...pwCard, tapped: false, counters: {} });
+            appendLog(game, `${pwCard.name} has no loyalty — sent to graveyard`);
+            io.to(game.roomId).emit('game:announcement', { message: `${pwCard.name} has no loyalty — sent to graveyard`, type: 'info' });
+          }
+          break;
+        }
+      }
     }
 
     // Advance to end_combat and clear combat state

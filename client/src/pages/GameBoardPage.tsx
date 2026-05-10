@@ -698,6 +698,25 @@ function PtBar({ card }: { card: GameCard }) {
   );
 }
 
+function LoyaltyBar({ card }: { card: GameCard }) {
+  const isPlaneswalker = (card.typeLine ?? '').includes('Planeswalker');
+  if (!isPlaneswalker) return null;
+  const loyalty = card.counters?.['loyalty'] ?? 0;
+  return (
+    <div style={{
+      position: 'absolute', bottom: 4, left: '50%', transform: 'translateX(-50%)',
+      zIndex: 25, pointerEvents: 'none',
+      background: 'linear-gradient(135deg, #92400e, #78350f)',
+      border: '2px solid #fbbf24', borderRadius: 8,
+      padding: '2px 12px', display: 'flex', alignItems: 'center', gap: 5,
+      boxShadow: '0 0 12px rgba(251,191,36,0.5)',
+    }}>
+      <span style={{ fontSize: 14 }}>⬡</span>
+      <span style={{ fontSize: 18, fontWeight: 900, color: '#fef3c7', lineHeight: 1 }}>{loyalty}</span>
+    </div>
+  );
+}
+
 function TokenPtOverlay({ card }: { card: GameCard }) {
   if (!card.isToken) return null;
   if (!(card.typeLine ?? '').includes('Creature')) return null;
@@ -929,6 +948,7 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
 
   const counters = card.counters ?? {};
   const hasCounters = Object.values(counters).some((n) => n > 0);
+  const isPlaneswalker = (card.typeLine ?? '').includes('Planeswalker');
 
   // ── Token branch — delegate to isolated TokenCard; hooks already called above ──
   if (card.isToken) {
@@ -980,10 +1000,10 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
       </div>
 
       {/* Keyword + counter badges — top-left, stacked vertically */}
-      {((card.keywords ?? []).length > 0 || hasCounters) && (
+      {((!isPlaneswalker && (card.keywords ?? []).length > 0) || hasCounters) && (
         <div style={{ position: 'absolute', top: 3, left: 3, display: 'flex', flexDirection: 'column',
           gap: 2, zIndex: 15, pointerEvents: 'none', maxWidth: '75%' }}>
-          {(card.keywords ?? []).length > 0 && (
+          {!isPlaneswalker && (card.keywords ?? []).length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
               {(card.keywords ?? []).map((kw) => (
                 <span key={kw} style={{
@@ -1003,6 +1023,26 @@ function MyBattlefieldCard({ card, onTap, onGraveyard, onExile, onReturnCommande
 
       {/* P/T bar for real (non-token) cards only */}
       <PtBar card={card} />
+      <LoyaltyBar card={card} />
+      {/* Loyalty quick buttons — planeswalkers only */}
+      {isPlaneswalker && (
+        <div
+          className="absolute inset-x-0 bottom-0 opacity-0 group-hover:opacity-100 transition-opacity z-30"
+          onMouseDown={e => e.stopPropagation()}
+          style={{ display: 'flex', justifyContent: 'space-around', padding: '4px 4px 36px',
+            background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 100%)' }}>
+          {[{ label: '+1', d: 1 }, { label: '-1', d: -1 }, { label: '-2', d: -2 }, { label: '-3', d: -3 }].map(({ label, d }) => (
+            <button key={label}
+              onClick={e => { e.stopPropagation(); onUpdateCounter('loyalty', d); }}
+              style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 800, cursor: 'pointer',
+                background: d > 0 ? '#14532d' : '#7f1d1d',
+                border: `1px solid ${d > 0 ? '#4ade80' : '#ef4444'}`,
+                color: '#fff' }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ⋮ button */}
       <button
@@ -1606,7 +1646,7 @@ function calcCombatResults(attacks: CombatAttackEntry[], blocks: CombatBlockEntr
 
 interface CombatResultsModalProps {
   combatState: PersonalCombatState;
-  onConfirm: (payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[]; lifeGain: { userId: string; amount: number }[] }) => void;
+  onConfirm: (payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[]; lifeGain: { userId: string; amount: number }[]; loyaltyDamage: { targetInstanceId: string; amount: number }[] }) => void;
   onCancel: () => void;
 }
 
@@ -1649,6 +1689,7 @@ function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsM
     const deadToCommandZone: string[] = [];
     const lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[] = [];
     const lifeGain: { userId: string; amount: number }[] = [];
+    const loyaltyDamage: { targetInstanceId: string; amount: number }[] = [];
 
     for (const r of results) {
       // Lifelink gain for attacker's controller
@@ -1674,22 +1715,37 @@ function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsM
           }
         }
       }
-      // Life loss
+      // Life loss or loyalty damage
+      const pwId = r.attacker.targetPlaneswalkerInstanceId;
       if (r.isUnblocked && r.damageToPlayer > 0) {
-        lifeLost.push({ targetUserId: r.attacker.targetUserId, amount: r.damageToPlayer, fromInstanceId: r.attacker.attackerId, isCommanderDmg: r.attacker.attackerIsCommander });
+        if (pwId) {
+          loyaltyDamage.push({ targetInstanceId: pwId, amount: r.damageToPlayer });
+        } else {
+          lifeLost.push({ targetUserId: r.attacker.targetUserId, amount: r.damageToPlayer, fromInstanceId: r.attacker.attackerId, isCommanderDmg: r.attacker.attackerIsCommander });
+        }
       }
       if (!r.isUnblocked && r.excessDamage > 0) {
         const hasTrample = (r.attacker.attackerKeywords ?? []).includes('Trample');
         if (hasTrample) {
-          lifeLost.push({ targetUserId: r.attacker.targetUserId, amount: r.excessDamage, fromInstanceId: r.attacker.attackerId, isCommanderDmg: r.attacker.attackerIsCommander });
+          if (pwId) {
+            loyaltyDamage.push({ targetInstanceId: pwId, amount: r.excessDamage });
+          } else {
+            lifeLost.push({ targetUserId: r.attacker.targetUserId, amount: r.excessDamage, fromInstanceId: r.attacker.attackerId, isCommanderDmg: r.attacker.attackerIsCommander });
+          }
         } else {
           const excess = manualExcess[r.attacker.attackerId] ?? 0;
-          if (excess > 0) lifeLost.push({ targetUserId: r.attacker.targetUserId, amount: excess, fromInstanceId: r.attacker.attackerId, isCommanderDmg: r.attacker.attackerIsCommander });
+          if (excess > 0) {
+            if (pwId) {
+              loyaltyDamage.push({ targetInstanceId: pwId, amount: excess });
+            } else {
+              lifeLost.push({ targetUserId: r.attacker.targetUserId, amount: excess, fromInstanceId: r.attacker.attackerId, isCommanderDmg: r.attacker.attackerIsCommander });
+            }
+          }
         }
       }
     }
 
-    onConfirm({ deadToGY, deadToCommandZone, lifeLost, lifeGain });
+    onConfirm({ deadToGY, deadToCommandZone, lifeLost, lifeGain, loyaltyDamage });
   }
 
   const overlay: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center' };
@@ -1751,7 +1807,9 @@ function CombatResultsModal({ combatState, onConfirm, onCancel }: CombatResultsM
               <div style={{ flex: 1 }}>
                 {r.isUnblocked ? (
                   <div>
-                    <span style={{ fontSize: 11, color: '#facc15', fontWeight: 700 }}>UNBLOCKED → {r.attacker.targetPlayerName}</span>
+                    <span style={{ fontSize: 11, color: '#facc15', fontWeight: 700 }}>
+                      UNBLOCKED → {r.attacker.targetPlaneswalkerName ? `⬡ ${r.attacker.targetPlaneswalkerName}` : r.attacker.targetPlayerName}
+                    </span>
                     <span style={{ fontSize: 11, color: '#e5e7eb', marginLeft: 6 }}>deals {atkPT.power} damage</span>
                     {r.attacker.attackerIsCommander && <span style={{ fontSize: 10, color: '#fbbf24', marginLeft: 4 }}>👑 +cmdr dmg</span>}
                   </div>
@@ -1953,7 +2011,16 @@ function CombatPanel({
                       style={{ fontSize: 11, background: '#1e293b', border: '1px solid #334155', color: '#e5e7eb', borderRadius: 6, padding: '3px 6px' }}>
                       <option value="">Select target…</option>
                       {opponentPlayers.map(p => (
-                        <option key={p.userId} value={p.userId}>{p.playerName}</option>
+                        <React.Fragment key={p.userId}>
+                          <option value={p.userId}>{p.playerName}</option>
+                          {p.battlefield
+                            .filter(c => (c.typeLine ?? '').includes('Planeswalker'))
+                            .map(pw => (
+                              <option key={`pw:${pw.instanceId}`} value={`pw:${pw.instanceId}`}>
+                                {p.playerName}'s {pw.name}
+                              </option>
+                            ))}
+                        </React.Fragment>
                       ))}
                     </select>
                   </div>
@@ -3340,18 +3407,22 @@ export default function GameBoardPage() {
       if (k === 'f' || k === 'F') { socket.emit('game:flip_card', { instanceId: id }); return; }
       if (k === '+' || k === '=') {
         console.log('key pressed', e.key, 'card:', card?.name, 'isToken:', card?.isToken);
+        const isPw = (card?.typeLine ?? '').includes('Planeswalker');
         const isArtifactToken = card?.isToken && !(card.typeLine ?? '').includes('Creature');
         socket.emit('game:update_counter', {
           instanceId: id,
-          counter: isArtifactToken ? 'quantity' : '+1/+1',
+          counter: isPw ? 'loyalty' : isArtifactToken ? 'quantity' : '+1/+1',
           delta: 1,
         });
         return;
       }
       if (k === '-' || k === '_') {
         console.log('key pressed', e.key, 'card:', card?.name, 'isToken:', card?.isToken);
+        const isPw = (card?.typeLine ?? '').includes('Planeswalker');
         const isArtifactToken = card?.isToken && !(card.typeLine ?? '').includes('Creature');
-        if (isArtifactToken) {
+        if (isPw) {
+          socket.emit('game:update_counter', { instanceId: id, counter: 'loyalty', delta: -1 });
+        } else if (isArtifactToken) {
           // quantity counter; server removes token from battlefield when it hits 0
           socket.emit('game:update_counter', { instanceId: id, counter: 'quantity', delta: -1 });
         } else {
@@ -3534,8 +3605,17 @@ export default function GameBoardPage() {
   function handleDeclareAttackers() {
     const aliveOpponents = opponents.filter(p => !p.eliminated);
     const attacks = Array.from(selectedAttackers).map(attackerId => {
-      const targetUserId = attackerTargets.get(attackerId) ?? aliveOpponents[0]?.userId ?? '';
-      return { attackerId, targetUserId };
+      const rawTarget = attackerTargets.get(attackerId) ?? aliveOpponents[0]?.userId ?? '';
+      if (rawTarget.startsWith('pw:')) {
+        const pwInstanceId = rawTarget.slice(3);
+        const ownerPlayer = aliveOpponents.find(p => p.battlefield.some(c => c.instanceId === pwInstanceId));
+        return {
+          attackerId,
+          targetUserId: ownerPlayer?.userId ?? aliveOpponents[0]?.userId ?? '',
+          targetPlaneswalkerInstanceId: pwInstanceId,
+        };
+      }
+      return { attackerId, targetUserId: rawTarget };
     });
     socket.emit('game:declare_attackers', { attacks });
     setSelectedAttackers(new Set());
@@ -3561,7 +3641,7 @@ export default function GameBoardPage() {
     setBlockerAssignments(prev => { const m = new Map(prev); m.delete(blockerId); return m; });
   }
 
-  function handleResolveCombat(payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[]; lifeGain: { userId: string; amount: number }[] }) {
+  function handleResolveCombat(payload: { deadToGY: string[]; deadToCommandZone: string[]; lifeLost: { targetUserId: string; amount: number; fromInstanceId: string; isCommanderDmg: boolean }[]; lifeGain: { userId: string; amount: number }[]; loyaltyDamage: { targetInstanceId: string; amount: number }[] }) {
     socket.emit('game:resolve_combat', payload);
     setShowCombatResults(false);
   }
